@@ -137,3 +137,58 @@ def test_cli_dry_run_reports_discovery_without_persisting_state(tmp_path: Path) 
 
     versions = get_source_document_versions(sqlite_path=sqlite_path, source_id="australia_institute")
     assert versions == []
+
+
+def test_cli_can_resolve_sitemap_index_using_child_pattern(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    sitemap_index_xml = """
+    <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <sitemap><loc>https://australiainstitute.org.au/tai_cpt_report-sitemap.xml</loc></sitemap>
+      <sitemap><loc>https://australiainstitute.org.au/page-sitemap.xml</loc></sitemap>
+    </sitemapindex>
+    """.strip()
+    child_report_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://australiainstitute.org.au/report-1</loc></url>
+    </urlset>
+    """.strip()
+    child_page_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://australiainstitute.org.au/about</loc></url>
+    </urlset>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        if url.endswith("sitemap_index.xml"):
+            return sitemap_index_xml
+        if url.endswith("tai_cpt_report-sitemap.xml"):
+            return child_report_xml
+        return child_page_xml
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "australia_institute",
+            "--sitemap-url",
+            "https://australiainstitute.org.au/sitemap_index.xml",
+            "--child-sitemap-pattern",
+            "tai_cpt_report-sitemap",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+        ],
+        fetch_document=lambda _url, _ua: ("text/plain", b"index-based run"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    assert "processed_urls=1" in output.getvalue()
+
+    versions = get_source_document_versions(sqlite_path=sqlite_path, source_id="australia_institute")
+    assert len(versions) == 1
