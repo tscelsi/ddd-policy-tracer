@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Sequence
+from uuid import uuid4
 
 from .adapters import DiskArtifactStore, SQLiteSourceDocumentRepository, discover_urls_from_sitemap
 from .domain import SourceDocumentVersion, compute_checksum, normalize_source_document_id, normalize_text
@@ -12,13 +13,30 @@ from .domain import SourceDocumentVersion, compute_checksum, normalize_source_do
 
 @dataclass(frozen=True)
 class AcquisitionReport:
+    run_id: str
     processed_urls: int
     ingested_documents: int
     failed_documents: int
     skipped_urls: int
     retry_attempts: int
     document_failures: tuple[str, ...]
+    events: tuple[AcquisitionEvent, ...]
     run_status: Literal["completed", "completed_with_failures", "failed"]
+
+
+@dataclass(frozen=True)
+class AcquisitionEvent:
+    event_type: Literal[
+        "AcquisitionRunStarted",
+        "SourceDocumentIngested",
+        "SourceDocumentIngestionFailed",
+        "AcquisitionRunCompleted",
+    ]
+    run_id: str
+    source_id: str
+    source_url: str | None = None
+    source_document_id: str | None = None
+    run_status: Literal["completed", "completed_with_failures", "failed"] | None = None
 
 
 def ingest_source_documents(
@@ -43,6 +61,14 @@ def ingest_source_documents(
     skipped_urls = 0
     retry_attempts = 0
     document_failures: list[str] = []
+    run_id = str(uuid4())
+    events: list[AcquisitionEvent] = [
+        AcquisitionEvent(
+            event_type="AcquisitionRunStarted",
+            run_id=run_id,
+            source_id=source_id,
+        )
+    ]
 
     robots_checker = is_allowed_by_robots or (lambda _url, _ua: True)
 
@@ -93,9 +119,27 @@ def ingest_source_documents(
             )
             repository.add_version(version)
             ingested_documents += 1
+            events.append(
+                AcquisitionEvent(
+                    event_type="SourceDocumentIngested",
+                    run_id=run_id,
+                    source_id=source_id,
+                    source_url=source_url,
+                    source_document_id=source_document_id,
+                )
+            )
         except Exception as exc:
             failed_documents += 1
             document_failures.append(f"{source_url}: {exc}")
+            events.append(
+                AcquisitionEvent(
+                    event_type="SourceDocumentIngestionFailed",
+                    run_id=run_id,
+                    source_id=source_id,
+                    source_url=source_url,
+                    source_document_id=source_document_id,
+                )
+            )
 
     if failed_documents == 0:
         run_status: Literal["completed", "completed_with_failures", "failed"] = "completed"
@@ -104,13 +148,24 @@ def ingest_source_documents(
     else:
         run_status = "completed_with_failures"
 
+    events.append(
+        AcquisitionEvent(
+            event_type="AcquisitionRunCompleted",
+            run_id=run_id,
+            source_id=source_id,
+            run_status=run_status,
+        )
+    )
+
     return AcquisitionReport(
+        run_id=run_id,
         processed_urls=processed_urls,
         ingested_documents=ingested_documents,
         failed_documents=failed_documents,
         skipped_urls=skipped_urls,
         retry_attempts=retry_attempts,
         document_failures=tuple(document_failures),
+        events=tuple(events),
         run_status=run_status,
     )
 

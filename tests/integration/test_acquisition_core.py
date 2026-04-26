@@ -285,3 +285,39 @@ def test_terminal_failure_records_actionable_reason_after_retry_budget_exhausted
     assert len(report.document_failures) == 1
     assert "fails-hard" in report.document_failures[0]
     assert "request timeout" in report.document_failures[0]
+
+
+def test_domain_events_are_emitted_in_expected_lifecycle_sequence(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://australiainstitute.org.au/event-ok</loc></url>
+      <url><loc>https://australiainstitute.org.au/event-fail</loc></url>
+    </urlset>
+    """.strip()
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        if "event-fail" in url:
+            raise RuntimeError("boom")
+        return "text/plain", b"Eventful content"
+
+    report = ingest_source_documents(
+        source_id="australia_institute",
+        sitemap_xml=sitemap_xml,
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+    )
+
+    assert [event.event_type for event in report.events] == [
+        "AcquisitionRunStarted",
+        "SourceDocumentIngested",
+        "SourceDocumentIngestionFailed",
+        "AcquisitionRunCompleted",
+    ]
+    assert all(event.run_id == report.run_id for event in report.events)
+    assert all(event.source_id == "australia_institute" for event in report.events)
+    assert report.events[1].source_url == "https://australiainstitute.org.au/event-ok"
+    assert report.events[2].source_url == "https://australiainstitute.org.au/event-fail"
+    assert report.events[3].run_status == "completed_with_failures"
