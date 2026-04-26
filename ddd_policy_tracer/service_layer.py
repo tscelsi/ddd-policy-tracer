@@ -51,6 +51,7 @@ def ingest_source_documents(
     max_retries: int = 2,
     backoff_seconds: Sequence[float] = (0.25, 0.5),
     sleep_fn: Callable[[float], None] = time.sleep,
+    limit: int | None = None,
 ) -> AcquisitionReport:
     repository = SQLiteSourceDocumentRepository(sqlite_path)
     artifact_store = DiskArtifactStore(artifact_dir)
@@ -72,7 +73,11 @@ def ingest_source_documents(
 
     robots_checker = is_allowed_by_robots or (lambda _url, _ua: True)
 
-    for source_url in discover_urls_from_sitemap(sitemap_xml):
+    discovered_urls = discover_urls_from_sitemap(sitemap_xml)
+    if limit is not None:
+        discovered_urls = discovered_urls[: max(0, limit)]
+
+    for source_url in discovered_urls:
         processed_urls += 1
 
         if not robots_checker(source_url, user_agent):
