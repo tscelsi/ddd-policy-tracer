@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 from .adapters import DiskArtifactStore, SQLiteSourceDocumentRepository, discover_urls_from_sitemap
 from .domain import SourceDocumentVersion, compute_checksum, normalize_source_document_id, normalize_text
@@ -13,6 +13,7 @@ class AcquisitionReport:
     processed_urls: int
     ingested_documents: int
     failed_documents: int
+    run_status: Literal["completed", "completed_with_failures", "failed"]
 
 
 def ingest_source_documents(
@@ -67,10 +68,18 @@ def ingest_source_documents(
         except Exception:
             failed_documents += 1
 
+    if failed_documents == 0:
+        run_status: Literal["completed", "completed_with_failures", "failed"] = "completed"
+    elif ingested_documents == 0:
+        run_status = "failed"
+    else:
+        run_status = "completed_with_failures"
+
     return AcquisitionReport(
         processed_urls=processed_urls,
         ingested_documents=ingested_documents,
         failed_documents=failed_documents,
+        run_status=run_status,
     )
 
 
