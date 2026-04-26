@@ -169,3 +169,119 @@ def test_run_status_is_failed_when_all_urls_fail(tmp_path: Path) -> None:
     assert report.ingested_documents == 0
     assert report.failed_documents == 2
     assert report.run_status == "failed"
+
+
+def test_compliance_blocks_disallowed_url_and_uses_configured_user_agent(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://australiainstitute.org.au/allowed-report</loc></url>
+      <url><loc>https://australiainstitute.org.au/blocked-report</loc></url>
+    </urlset>
+    """.strip()
+
+    fetched_urls: list[str] = []
+    seen_user_agents: list[str] = []
+
+    def fetch_document(url: str, user_agent: str) -> tuple[str, bytes]:
+        fetched_urls.append(url)
+        seen_user_agents.append(user_agent)
+        return "text/plain", b"Compliant content."
+
+    def is_allowed_by_robots(url: str, _: str) -> bool:
+        return "blocked" not in url
+
+    report = ingest_source_documents(
+        source_id="australia_institute",
+        sitemap_xml=sitemap_xml,
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        user_agent="policy-tracer/0.1",
+        is_allowed_by_robots=is_allowed_by_robots,
+    )
+
+    assert fetched_urls == ["https://australiainstitute.org.au/allowed-report"]
+    assert seen_user_agents == ["policy-tracer/0.1"]
+    assert report.processed_urls == 2
+    assert report.ingested_documents == 1
+    assert report.failed_documents == 0
+    assert report.skipped_urls == 1
+
+
+def test_transient_failure_is_retried_and_observable(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://australiainstitute.org.au/retry-report</loc></url>
+    </urlset>
+    """.strip()
+
+    attempts = 0
+
+    def fetch_document(_: str) -> tuple[str, bytes]:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise TimeoutError("temporary timeout")
+        return "text/plain", b"Recovered after retries."
+
+    sleep_calls: list[float] = []
+
+    report = ingest_source_documents(
+        source_id="australia_institute",
+        sitemap_xml=sitemap_xml,
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        max_retries=2,
+        backoff_seconds=(0.1, 0.2),
+        sleep_fn=sleep_calls.append,
+    )
+
+    assert attempts == 3
+    assert sleep_calls == [0.1, 0.2]
+    assert report.ingested_documents == 1
+    assert report.failed_documents == 0
+    assert report.retry_attempts == 2
+
+
+def test_terminal_failure_records_actionable_reason_after_retry_budget_exhausted(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://australiainstitute.org.au/fails-hard</loc></url>
+    </urlset>
+    """.strip()
+
+    attempts = 0
+
+    def fetch_document(_: str) -> tuple[str, bytes]:
+        nonlocal attempts
+        attempts += 1
+        raise TimeoutError("request timeout")
+
+    report = ingest_source_documents(
+        source_id="australia_institute",
+        sitemap_xml=sitemap_xml,
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        max_retries=1,
+        backoff_seconds=(0.01,),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert attempts == 2
+    assert report.ingested_documents == 0
+    assert report.failed_documents == 1
+    assert report.run_status == "failed"
+    assert report.retry_attempts == 0
+    assert len(report.document_failures) == 1
+    assert "fails-hard" in report.document_failures[0]
+    assert "request timeout" in report.document_failures[0]
