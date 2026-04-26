@@ -1,4 +1,5 @@
-from .service_layer import AcquisitionReport, SourceDocumentVersion, get_source_document_versions, ingest_source_documents
+from .domain import SourceDocumentVersion
+from .service_layer import AcquisitionReport, get_source_document_versions, ingest_source_documents
 
 __all__ = [
     "AcquisitionReport",

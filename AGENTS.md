@@ -151,3 +151,11 @@ Each PR or handoff should state:
 - Boundaries touched (context/aggregate/UoW/port/adapter)
 - Test coverage added (unit/integration/e2e)
 - Risks and follow-up decisions
+
+## 12) Python environment and dependency management
+
+- Use `uv` as the only project and package manager for this repository.
+- Prefer `uv run <command>` for all local execution (tests, lint, type checks, scripts).
+- Prefer `uv sync` for environment synchronization and lockfile-aware dependency installation.
+- When adding dependencies, use `uv add <package>` (and `uv add --dev <package>` for dev-only tools).
+- Do not introduce `pip`/`requirements.txt`-based workflows, Poetry, or Pipenv for this repo.
