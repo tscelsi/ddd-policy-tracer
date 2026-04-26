@@ -1,6 +1,24 @@
-def main() -> None:
-    print("Hello from ddd-policy-tracer!")
+from __future__ import annotations
+
+import sys
+from typing import Sequence
+from urllib.request import Request, urlopen
+
+from ddd_policy_tracer.cli import run_cli
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    return run_cli(args, fetch_document=fetch_document_over_http, stdout=sys.stdout)
+
+
+def fetch_document_over_http(url: str, user_agent: str) -> tuple[str, bytes]:
+    request = Request(url, headers={"User-Agent": user_agent})
+    with urlopen(request, timeout=30) as response:
+        content_type = response.headers.get_content_type() or "application/octet-stream"
+        payload = response.read()
+    return content_type, payload
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
