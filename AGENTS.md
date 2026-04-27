@@ -159,3 +159,11 @@ Each PR or handoff should state:
 - Prefer `uv sync` for environment synchronization and lockfile-aware dependency installation.
 - When adding dependencies, use `uv add <package>` (and `uv add --dev <package>` for dev-only tools).
 - Do not introduce `pip`/`requirements.txt`-based workflows, Poetry, or Pipenv for this repo.
+
+## 13) Commenting and docstring standard
+
+- Every function and method should include a short docstring explaining what it does in domain terms.
+- Prefer one to two lines in plain language; avoid restating the function name.
+- Focus on behavior and intent (`why/what`), not line-by-line implementation details (`how`).
+- Add argument/return detail only when it is non-obvious from type hints and naming.
+- Keep comments current: update docstrings whenever behavior changes.

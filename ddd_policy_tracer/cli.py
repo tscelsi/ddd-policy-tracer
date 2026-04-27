@@ -1,9 +1,12 @@
+"""Operator CLI entrypoint and sitemap resolution helpers."""
+
 from __future__ import annotations
 
 import argparse
 import xml.etree.ElementTree as ET
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Callable, Sequence, TextIO
+from typing import TextIO
 
 from .service_layer import ingest_source_documents
 
@@ -15,6 +18,7 @@ def run_cli(
     stdout: TextIO,
     fetch_text_url: Callable[[str, str], str] | None = None,
 ) -> int:
+    """Execute operator CLI commands for manual acquisition runs."""
     parser = argparse.ArgumentParser(prog="ddd-policy-tracer")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -45,7 +49,9 @@ def run_cli(
     )
 
     if args.dry_run:
-        discovered = _discover_urls_with_limit(sitemap_xml=sitemap_xml, limit=args.limit)
+        discovered = _discover_urls_with_limit(
+            sitemap_xml=sitemap_xml, limit=args.limit
+        )
         stdout.write(
             " ".join(
                 [
@@ -86,7 +92,10 @@ def run_cli(
     return 0
 
 
-def _discover_urls_with_limit(*, sitemap_xml: str, limit: int | None) -> list[str]:
+def _discover_urls_with_limit(
+    *, sitemap_xml: str, limit: int | None
+) -> list[str]:
+    """Discover URLs from sitemap XML and apply an optional upper bound."""
     from .adapters import discover_urls_from_sitemap
 
     urls = discover_urls_from_sitemap(sitemap_xml)
@@ -103,11 +112,14 @@ def _load_sitemap_xml(
     user_agent: str,
     fetch_text_url: Callable[[str, str], str] | None,
 ) -> tuple[str, int]:
+    """Load sitemap XML from local file or URL, resolving indexes as needed."""
     if sitemap_xml_path is not None:
         return Path(sitemap_xml_path).read_text(encoding="utf-8"), 1
 
     if sitemap_url is None:
-        raise ValueError("Either --sitemap-xml-path or --sitemap-url is required")
+        raise ValueError(
+            "Either --sitemap-xml-path or --sitemap-url is required"
+        )
 
     if fetch_text_url is None:
         raise ValueError("fetch_text_url is required when using --sitemap-url")
@@ -116,32 +128,43 @@ def _load_sitemap_xml(
     if _is_sitemap_index(root_xml):
         child_sitemaps = _discover_child_sitemaps(root_xml)
         if child_sitemap_pattern is not None:
-            child_sitemaps = [url for url in child_sitemaps if child_sitemap_pattern in url]
-        child_urlsets = [fetch_text_url(url, user_agent) for url in child_sitemaps]
+            child_sitemaps = [
+                url for url in child_sitemaps if child_sitemap_pattern in url
+            ]
+        child_urlsets = [
+            fetch_text_url(url, user_agent) for url in child_sitemaps
+        ]
         return _merge_urlsets(child_urlsets), len(child_sitemaps)
 
     return root_xml, 1
 
 
 def _is_sitemap_index(xml_text: str) -> bool:
+    """Return true when the XML payload is a sitemap index document."""
     root = ET.fromstring(xml_text)
     return root.tag.endswith("sitemapindex")
 
 
 def _discover_child_sitemaps(sitemap_index_xml: str) -> list[str]:
+    """Extract child sitemap URLs from a sitemap index document."""
     root = ET.fromstring(sitemap_index_xml)
     namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-    return [node.text.strip() for node in root.findall("sm:sitemap/sm:loc", namespace) if node.text]
+    return [
+        node.text.strip()
+        for node in root.findall("sm:sitemap/sm:loc", namespace)
+        if node.text
+    ]
 
 
 def _merge_urlsets(urlset_xml_documents: list[str]) -> str:
+    """Merge URL set documents into one deduplicated URL set XML payload."""
     urls: list[str] = []
     for xml_text in urlset_xml_documents:
         urls.extend(_discover_urls_with_limit(sitemap_xml=xml_text, limit=None))
 
     unique_urls = list(dict.fromkeys(urls))
     lines = [
-        "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">",
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
         *[f"  <url><loc>{url}</loc></url>" for url in unique_urls],
         "</urlset>",
     ]

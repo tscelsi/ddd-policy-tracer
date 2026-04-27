@@ -1,3 +1,5 @@
+"""Pytest configuration for repository-local import resolution."""
+
 from __future__ import annotations
 
 import sys
