@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 from uuid import uuid4
+
+from pypdf import PdfReader
 
 from .domain import SourceDocumentVersion
 
@@ -104,6 +110,80 @@ class SQLiteSourceDocumentRepository:
         return [SourceDocumentVersion(*row) for row in rows]
 
 
+class FilesystemSourceDocumentRepository:
+    """Store and retrieve source document versions from filesystem state."""
+
+    def __init__(self, state_path: Path) -> None:
+        """Bind repository state to one JSONL file path."""
+        self._state_path = state_path
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def get_latest(
+        self,
+        *,
+        source_id: str,
+        source_document_id: str,
+    ) -> SourceDocumentVersion | None:
+        """Return the latest stored version for one source identity."""
+        versions = self._read_all()
+        matches = [
+            version
+            for version in versions
+            if version.source_id == source_id
+            and version.source_document_id == source_document_id
+        ]
+        if not matches:
+            return None
+        return matches[-1]
+
+    def add_version(self, version: SourceDocumentVersion) -> None:
+        """Append one version record to the filesystem state file."""
+        record = {
+            "source_id": version.source_id,
+            "source_document_id": version.source_document_id,
+            "source_url": version.source_url,
+            "checksum": version.checksum,
+            "normalized_text": version.normalized_text,
+            "raw_content_ref": version.raw_content_ref,
+            "content_type": version.content_type,
+        }
+        line = json.dumps(record, ensure_ascii=True)
+        with self._state_path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+    def list_versions(self, *, source_id: str) -> list[SourceDocumentVersion]:
+        """List all stored versions for a source from filesystem state."""
+        return [
+            version
+            for version in self._read_all()
+            if version.source_id == source_id
+        ]
+
+    def _read_all(self) -> list[SourceDocumentVersion]:
+        """Load all stored versions from the JSONL state file."""
+        if not self._state_path.exists():
+            return []
+
+        versions: list[SourceDocumentVersion] = []
+        content = self._state_path.read_text(encoding="utf-8")
+        for raw_line in content.splitlines():
+            if not raw_line.strip():
+                continue
+            payload = json.loads(raw_line)
+            versions.append(
+                SourceDocumentVersion(
+                    source_id=payload["source_id"],
+                    source_document_id=payload["source_document_id"],
+                    source_url=payload["source_url"],
+                    checksum=payload["checksum"],
+                    normalized_text=payload["normalized_text"],
+                    raw_content_ref=payload["raw_content_ref"],
+                    content_type=payload["content_type"],
+                )
+            )
+        return versions
+
+
 class DiskArtifactStore:
     """Persist raw fetched artifacts to local disk storage."""
 
@@ -134,3 +214,76 @@ def discover_urls_from_sitemap(sitemap_xml: str) -> list[str]:
         if node.text
     ]
     return urls
+
+
+class _ReportPdfLinkParser(HTMLParser):
+    """Parse report-page anchors and collect link href/text pairs."""
+
+    def __init__(self) -> None:
+        """Initialize parser state for one HTML document traversal."""
+        super().__init__()
+        self.links: list[tuple[str, str]] = []
+        self._active_href: str | None = None
+        self._active_text_parts: list[str] = []
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        """Track anchor href values while entering anchor tags."""
+        if tag != "a":
+            return
+
+        attr_map = dict(attrs)
+        href = attr_map.get("href")
+        if href is None:
+            return
+
+        self._active_href = href
+        self._active_text_parts = []
+
+    def handle_data(self, data: str) -> None:
+        """Accumulate visible anchor text content for prioritization."""
+        if self._active_href is not None:
+            self._active_text_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        """Record completed anchor link data when exiting anchor tags."""
+        if tag != "a" or self._active_href is None:
+            return
+
+        text = "".join(self._active_text_parts).strip()
+        self.links.append((self._active_href, text))
+        self._active_href = None
+        self._active_text_parts = []
+
+
+def extract_pdf_urls_from_report_html(
+    report_url: str, html_bytes: bytes
+) -> list[str]:
+    """Extract and prioritize absolute PDF links from a report HTML page."""
+    parser = _ReportPdfLinkParser()
+    parser.feed(html_bytes.decode("utf-8", errors="ignore"))
+
+    full_report_urls: list[str] = []
+    other_pdf_urls: list[str] = []
+
+    for href, text in parser.links:
+        absolute_url = urljoin(report_url, href)
+        parsed = urlparse(absolute_url)
+        if not parsed.path.lower().endswith(".pdf"):
+            continue
+
+        if "full report" in text.casefold():
+            full_report_urls.append(absolute_url)
+        else:
+            other_pdf_urls.append(absolute_url)
+
+    ordered = full_report_urls + other_pdf_urls
+    return list(dict.fromkeys(ordered))
+
+
+def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    """Extract concatenated plain text from all pages of a PDF payload."""
+    reader = PdfReader(BytesIO(pdf_bytes))
+    texts = [page.extract_text() or "" for page in reader.pages]
+    return "\n".join(text for text in texts if text).strip()
