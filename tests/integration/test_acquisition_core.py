@@ -54,8 +54,6 @@ def _report_html_with_pdf_link(pdf_url: str) -> bytes:
         f'<a href="{pdf_url}">Full report</a>'
     )
     return html.encode("utf-8")
-
-
 def test_ingest_from_sitemap_persists_first_source_document_version(
     tmp_path: Path,
 ) -> None:

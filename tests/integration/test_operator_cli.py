@@ -54,8 +54,6 @@ def _report_html_with_pdf_link(pdf_url: str) -> bytes:
         f'<a href="{pdf_url}">Full report</a>'
     )
     return html.encode("utf-8")
-
-
 def test_cli_runs_manual_acquisition_for_source_and_prints_result(
     tmp_path: Path,
 ) -> None:
