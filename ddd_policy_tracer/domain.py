@@ -1,3 +1,5 @@
+"""Domain primitives and normalization rules for source documents."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,6 +20,8 @@ TRACKING_QUERY_KEYS = {
 
 @dataclass(frozen=True)
 class SourceDocumentVersion:
+    """Represent one append-only version snapshot of a source document."""
+
     source_id: str
     source_document_id: str
     source_url: str
@@ -28,6 +32,7 @@ class SourceDocumentVersion:
 
 
 def normalize_source_document_id(raw_url: str) -> str:
+    """Normalize a source URL into a stable source-scoped document identity."""
     parts = urlsplit(raw_url.strip())
     scheme = parts.scheme.lower()
     netloc = parts.netloc.lower()
@@ -48,8 +53,10 @@ def normalize_source_document_id(raw_url: str) -> str:
 
 
 def compute_checksum(raw_content: bytes) -> str:
+    """Compute a deterministic content hash for version change detection."""
     return sha256(raw_content).hexdigest()
 
 
 def normalize_text(raw_text: str) -> str:
+    """Apply minimal whitespace normalization to extracted document text."""
     return " ".join(raw_text.split())

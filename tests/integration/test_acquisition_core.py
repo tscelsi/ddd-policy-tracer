@@ -1,9 +1,17 @@
+"""Integration tests for core acquisition service behavior."""
+
 from pathlib import Path
 
-from ddd_policy_tracer import get_source_document_versions, ingest_source_documents
+from ddd_policy_tracer import (
+    get_source_document_versions,
+    ingest_source_documents,
+)
 
 
-def test_ingest_from_sitemap_persists_first_source_document_version(tmp_path: Path) -> None:
+def test_ingest_from_sitemap_persists_first_source_document_version(
+    tmp_path: Path,
+) -> None:
+    """Verify one sitemap URL is ingested and persisted with artifact data."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -36,13 +44,17 @@ def test_ingest_from_sitemap_persists_first_source_document_version(tmp_path: Pa
 
     assert len(versions) == 1
     version = versions[0]
-    assert version.source_document_id == "https://australiainstitute.org.au/report-1"
+    assert (
+        version.source_document_id
+        == "https://australiainstitute.org.au/report-1"
+    )
     assert version.normalized_text == "This is a report about policy reform."
     assert version.raw_content_ref.startswith(str(artifact_dir))
     assert Path(version.raw_content_ref).exists()
 
 
 def test_reprocessing_same_unchanged_url_is_idempotent(tmp_path: Path) -> None:
+    """Ensure unchanged content does not create duplicate persisted versions."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -72,11 +84,14 @@ def test_reprocessing_same_unchanged_url_is_idempotent(tmp_path: Path) -> None:
     assert first_report.ingested_documents == 1
     assert second_report.ingested_documents == 0
 
-    versions = get_source_document_versions(sqlite_path=sqlite_path, source_id="australia_institute")
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path, source_id="australia_institute"
+    )
     assert len(versions) == 1
 
 
 def test_checksum_change_appends_new_version(tmp_path: Path) -> None:
+    """Ensure checksum changes append a new version for the same identity."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -110,12 +125,17 @@ def test_checksum_change_appends_new_version(tmp_path: Path) -> None:
 
     assert second_report.ingested_documents == 1
 
-    versions = get_source_document_versions(sqlite_path=sqlite_path, source_id="australia_institute")
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path, source_id="australia_institute"
+    )
     assert len(versions) == 2
     assert versions[0].checksum != versions[1].checksum
 
 
-def test_run_status_is_completed_with_failures_for_mixed_outcomes(tmp_path: Path) -> None:
+def test_run_status_is_completed_with_failures_for_mixed_outcomes(
+    tmp_path: Path,
+) -> None:
+    """Report mixed run outcomes as completed_with_failures."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -145,6 +165,7 @@ def test_run_status_is_completed_with_failures_for_mixed_outcomes(tmp_path: Path
 
 
 def test_run_status_is_failed_when_all_urls_fail(tmp_path: Path) -> None:
+    """Report run status failed when every processed URL fails."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -171,7 +192,10 @@ def test_run_status_is_failed_when_all_urls_fail(tmp_path: Path) -> None:
     assert report.run_status == "failed"
 
 
-def test_compliance_blocks_disallowed_url_and_uses_configured_user_agent(tmp_path: Path) -> None:
+def test_compliance_blocks_disallowed_url_and_uses_configured_user_agent(
+    tmp_path: Path,
+) -> None:
+    """Skip disallowed URLs and pass user-agent into compliant fetch calls."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -211,6 +235,7 @@ def test_compliance_blocks_disallowed_url_and_uses_configured_user_agent(tmp_pat
 
 
 def test_transient_failure_is_retried_and_observable(tmp_path: Path) -> None:
+    """Retry transient fetch failures and expose retry attempts in report."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -248,9 +273,10 @@ def test_transient_failure_is_retried_and_observable(tmp_path: Path) -> None:
     assert report.retry_attempts == 2
 
 
-def test_terminal_failure_records_actionable_reason_after_retry_budget_exhausted(
+def test_terminal_failure_records_actionable_reason_after_retries_exhausted(
     tmp_path: Path,
 ) -> None:
+    """Record actionable failure details after retries are exhausted."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -287,7 +313,10 @@ def test_terminal_failure_records_actionable_reason_after_retry_budget_exhausted
     assert "request timeout" in report.document_failures[0]
 
 
-def test_domain_events_are_emitted_in_expected_lifecycle_sequence(tmp_path: Path) -> None:
+def test_domain_events_are_emitted_in_expected_lifecycle_sequence(
+    tmp_path: Path,
+) -> None:
+    """Emit ordered run/document lifecycle events with run context."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
@@ -317,7 +346,15 @@ def test_domain_events_are_emitted_in_expected_lifecycle_sequence(tmp_path: Path
         "AcquisitionRunCompleted",
     ]
     assert all(event.run_id == report.run_id for event in report.events)
-    assert all(event.source_id == "australia_institute" for event in report.events)
-    assert report.events[1].source_url == "https://australiainstitute.org.au/event-ok"
-    assert report.events[2].source_url == "https://australiainstitute.org.au/event-fail"
+    assert all(
+        event.source_id == "australia_institute" for event in report.events
+    )
+    assert (
+        report.events[1].source_url
+        == "https://australiainstitute.org.au/event-ok"
+    )
+    assert (
+        report.events[2].source_url
+        == "https://australiainstitute.org.au/event-fail"
+    )
     assert report.events[3].run_status == "completed_with_failures"

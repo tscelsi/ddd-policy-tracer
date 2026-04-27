@@ -1,18 +1,32 @@
+"""Application service orchestration for document acquisition use cases."""
+
 from __future__ import annotations
 
 import inspect
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Literal
 from uuid import uuid4
 
-from .adapters import DiskArtifactStore, SQLiteSourceDocumentRepository, discover_urls_from_sitemap
-from .domain import SourceDocumentVersion, compute_checksum, normalize_source_document_id, normalize_text
+from .adapters import (
+    DiskArtifactStore,
+    SQLiteSourceDocumentRepository,
+    discover_urls_from_sitemap,
+)
+from .domain import (
+    SourceDocumentVersion,
+    compute_checksum,
+    normalize_source_document_id,
+    normalize_text,
+)
 
 
 @dataclass(frozen=True)
 class AcquisitionReport:
+    """Capture aggregate run results and emitted acquisition events."""
+
     run_id: str
     processed_urls: int
     ingested_documents: int
@@ -26,6 +40,8 @@ class AcquisitionReport:
 
 @dataclass(frozen=True)
 class AcquisitionEvent:
+    """Represent one domain event emitted during an acquisition run."""
+
     event_type: Literal[
         "AcquisitionRunStarted",
         "SourceDocumentIngested",
@@ -36,7 +52,9 @@ class AcquisitionEvent:
     source_id: str
     source_url: str | None = None
     source_document_id: str | None = None
-    run_status: Literal["completed", "completed_with_failures", "failed"] | None = None
+    run_status: (
+        Literal["completed", "completed_with_failures", "failed"] | None
+    ) = None
 
 
 def ingest_source_documents(
@@ -53,6 +71,7 @@ def ingest_source_documents(
     sleep_fn: Callable[[float], None] = time.sleep,
     limit: int | None = None,
 ) -> AcquisitionReport:
+    """Ingest discovered URLs and return aggregate acquisition outcomes."""
     repository = SQLiteSourceDocumentRepository(sqlite_path)
     artifact_store = DiskArtifactStore(artifact_dir)
 
@@ -106,7 +125,10 @@ def ingest_source_documents(
                 source_id=source_id,
                 source_document_id=source_document_id,
             )
-            if latest_version is not None and latest_version.checksum == checksum:
+            if (
+                latest_version is not None
+                and latest_version.checksum == checksum
+            ):
                 continue
 
             raw_content_ref = artifact_store.store(
@@ -147,7 +169,9 @@ def ingest_source_documents(
             )
 
     if failed_documents == 0:
-        run_status: Literal["completed", "completed_with_failures", "failed"] = "completed"
+        run_status: Literal[
+            "completed", "completed_with_failures", "failed"
+        ] = "completed"
     elif ingested_documents == 0:
         run_status = "failed"
     else:
@@ -180,6 +204,7 @@ def get_source_document_versions(
     sqlite_path: Path,
     source_id: str,
 ) -> list[SourceDocumentVersion]:
+    """Load persisted source document versions for one source."""
     repository = SQLiteSourceDocumentRepository(sqlite_path)
     return repository.list_versions(source_id=source_id)
 
@@ -190,6 +215,7 @@ def _call_fetch_document(
     source_url: str,
     user_agent: str,
 ) -> tuple[str, bytes]:
+    """Call the fetcher using supported URL-only or URL+agent signatures."""
     signature = inspect.signature(fetch_document)
     if len(signature.parameters) >= 2:
         return fetch_document(source_url, user_agent)
@@ -205,6 +231,7 @@ def _fetch_with_retries(
     backoff_seconds: Sequence[float],
     sleep_fn: Callable[[float], None],
 ) -> tuple[str, bytes, int]:
+    """Fetch one source URL with bounded retries for transient failures."""
     retries_used = 0
 
     while True:
