@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TextIO
 
@@ -19,31 +20,122 @@ def run_cli(
     fetch_text_url: Callable[[str, str], str] | None = None,
 ) -> int:
     """Execute operator CLI commands for manual acquisition runs."""
-    parser = argparse.ArgumentParser(prog="ddd-policy-tracer")
+    parser = argparse.ArgumentParser(
+        prog="ddd-policy-tracer",
+        description=(
+            "Acquire source documents from sitemaps and persist normalized "
+            "versions with audit metadata."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  ddd-policy-tracer acquire --source australia_institute "
+            "--sitemap-url https://australiainstitute.org.au/sitemap_index.xml "
+            "--child-sitemap-pattern tai_cpt_report-sitemap "
+            "--sqlite-path acquisition.db --artifact-dir artifacts\n"
+            "  ddd-policy-tracer acquire --source australia_institute "
+            "--sitemap-xml-path sitemap.xml --sqlite-path acquisition.db "
+            "--artifact-dir artifacts --published-within-years 2 --limit 50"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
     subparsers = parser.add_subparsers(dest="command")
 
-    acquire_parser = subparsers.add_parser("acquire")
-    acquire_parser.add_argument("--source", required=True)
+    acquire_parser = subparsers.add_parser(
+        "acquire",
+        help="Run one acquisition against a source",
+        description=(
+            "Discover report URLs from a sitemap, optionally filter by "
+            "publication time, then fetch and persist document versions."
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    acquire_parser.add_argument(
+        "--source",
+        required=True,
+        help="Source identifier stored on every persisted document version.",
+    )
     sitemap_group = acquire_parser.add_mutually_exclusive_group(required=True)
-    sitemap_group.add_argument("--sitemap-xml-path")
-    sitemap_group.add_argument("--sitemap-url")
-    acquire_parser.add_argument("--child-sitemap-pattern", default=None)
-    acquire_parser.add_argument("--sqlite-path", required=True)
+    sitemap_group.add_argument(
+        "--sitemap-xml-path",
+        help="Path to a local sitemap XML file (urlset or sitemapindex).",
+    )
+    sitemap_group.add_argument(
+        "--sitemap-url",
+        help="Remote sitemap URL to fetch over HTTP (supports sitemapindex).",
+    )
+    acquire_parser.add_argument(
+        "--child-sitemap-pattern",
+        default=None,
+        help=(
+            "Substring filter applied to child sitemap URLs when --sitemap-url "
+            "points to a sitemap index."
+        ),
+    )
+    acquire_parser.add_argument(
+        "--sqlite-path",
+        required=True,
+        help="Path to SQLite database file or JSONL state file.",
+    )
     acquire_parser.add_argument(
         "--repository-backend",
         choices=["sqlite", "filesystem"],
         default="sqlite",
+        help=(
+            "Persistence adapter. Use 'sqlite' for relational storage or "
+            "'filesystem' for JSONL state."
+        ),
     )
-    acquire_parser.add_argument("--artifact-dir", required=True)
-    acquire_parser.add_argument("--user-agent", default="ddd-policy-tracer/0.1")
-    acquire_parser.add_argument("--limit", type=int, default=None)
-    acquire_parser.add_argument("--dry-run", action="store_true")
+    acquire_parser.add_argument(
+        "--artifact-dir",
+        required=True,
+        help="Directory where raw fetched artifacts are written.",
+    )
+    acquire_parser.add_argument(
+        "--user-agent",
+        default="ddd-policy-tracer/0.1",
+        help="User-Agent header sent on HTTP requests.",
+    )
+    acquire_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of discovered sitemap URLs to process.",
+    )
+    published_group = acquire_parser.add_mutually_exclusive_group()
+    published_group.add_argument(
+        "--published-since",
+        default=None,
+        help=(
+            "Only process entries whose sitemap lastmod is on/after this UTC "
+            "timestamp (ISO-8601).\n"
+            "Example: 2024-01-01T00:00:00+00:00"
+        ),
+    )
+    published_group.add_argument(
+        "--published-within-years",
+        type=float,
+        default=None,
+        help=(
+            "Only process entries newer than now minus this many years.\n"
+            "Example: --published-within-years 2"
+        ),
+    )
+    acquire_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be processed without fetching or persisting.",
+    )
 
     args = parser.parse_args(list(argv))
 
     if args.command != "acquire":
         parser.print_help(file=stdout)
         return 2
+
+    published_since = _resolve_published_since(
+        published_since_raw=args.published_since,
+        published_within_years=args.published_within_years,
+    )
 
     sitemap_xml, selected_sitemaps = _load_sitemap_xml(
         sitemap_xml_path=args.sitemap_xml_path,
@@ -55,7 +147,9 @@ def run_cli(
 
     if args.dry_run:
         discovered = _discover_urls_with_limit(
-            sitemap_xml=sitemap_xml, limit=args.limit
+            sitemap_xml=sitemap_xml,
+            limit=args.limit,
+            published_since=published_since,
         )
         stdout.write(
             " ".join(
@@ -65,6 +159,7 @@ def run_cli(
                     f"discovered_urls={len(discovered)}",
                     f"selected_sitemaps={selected_sitemaps}",
                     f"limit={args.limit}",
+                    f"published_since={_format_datetime(published_since)}",
                 ]
             )
             + "\n"
@@ -80,6 +175,7 @@ def run_cli(
         user_agent=args.user_agent,
         repository_backend=args.repository_backend,
         limit=args.limit,
+        published_since=published_since,
     )
 
     stdout.write(
@@ -99,7 +195,10 @@ def run_cli(
 
 
 def _discover_urls_with_limit(
-    *, sitemap_xml: str, limit: int | None
+    *,
+    sitemap_xml: str,
+    limit: int | None,
+    published_since: datetime | None = None,
 ) -> list[str]:
     """Discover URLs from sitemap XML and apply an optional upper bound."""
     from .adapters import discover_sitemap_entries
@@ -107,6 +206,10 @@ def _discover_urls_with_limit(
     urls = [
         entry.source_url
         for entry in discover_sitemap_entries(sitemap_xml)
+        if _is_entry_published_on_or_after(
+            entry_published_at=entry.published_at,
+            published_since=published_since,
+        )
     ]
     if limit is not None:
         return urls[: max(0, limit)]
@@ -199,3 +302,62 @@ def _merge_urlsets(urlset_xml_documents: list[str]) -> str:
         "</urlset>",
     ])
     return "\n".join(lines)
+
+
+def _resolve_published_since(
+    *,
+    published_since_raw: str | None,
+    published_within_years: float | None,
+) -> datetime | None:
+    """Resolve publish-time filtering options into one UTC timestamp."""
+    if published_since_raw is not None:
+        parsed = _parse_datetime(published_since_raw)
+        if parsed is None:
+            raise ValueError(
+                "--published-since must be ISO-8601, "
+                "for example 2024-01-01T00:00:00+00:00"
+            )
+        return parsed
+
+    if published_within_years is None:
+        return None
+    if published_within_years <= 0:
+        raise ValueError("--published-within-years must be greater than 0")
+
+    days = published_within_years * 365.25
+    return datetime.now(UTC) - timedelta(days=days)
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    """Parse one datetime string into a UTC-aware timestamp."""
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _format_datetime(value: datetime | None) -> str:
+    """Format one optional datetime for CLI output."""
+    if value is None:
+        return "none"
+    return value.isoformat()
+
+
+def _is_entry_published_on_or_after(
+    *, entry_published_at: str | None, published_since: datetime | None
+) -> bool:
+    """Return true when an entry passes the optional publish-time filter."""
+    if published_since is None:
+        return True
+    if entry_published_at is None:
+        return False
+
+    entry_timestamp = _parse_datetime(entry_published_at)
+    if entry_timestamp is None:
+        return False
+    return entry_timestamp >= published_since

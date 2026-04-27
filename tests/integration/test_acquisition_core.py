@@ -1,5 +1,6 @@
 """Integration tests for core acquisition service behavior."""
 
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -166,6 +167,58 @@ def test_reprocessing_same_unchanged_url_is_idempotent(tmp_path: Path) -> None:
         sqlite_path=sqlite_path, source_id="australia_institute"
     )
     assert len(versions) == 1
+
+
+def test_published_since_filters_out_old_sitemap_entries(
+    tmp_path: Path,
+) -> None:
+    """Skip entries whose sitemap lastmod predates published_since."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url>
+        <loc>https://australiainstitute.org.au/report/new</loc>
+        <lastmod>2026-02-10T00:00:00+00:00</lastmod>
+      </url>
+      <url>
+        <loc>https://australiainstitute.org.au/report/old</loc>
+        <lastmod>2020-01-01T00:00:00+00:00</lastmod>
+      </url>
+    </urlset>
+    """.strip()
+
+    fetch_calls: list[str] = []
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        fetch_calls.append(url)
+        if url.endswith("/report/new"):
+            return (
+                "text/html",
+                _report_html_with_pdf_link(
+                    "https://australiainstitute.org.au/wp-content/new.pdf"
+                ),
+            )
+        if url.endswith("/new.pdf"):
+            return "application/pdf", _build_pdf_with_text("Fresh content")
+        raise AssertionError(f"unexpected url fetched: {url}")
+
+    report = ingest_source_documents(
+        source_id="australia_institute",
+        sitemap_xml=sitemap_xml,
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        published_since=datetime(2025, 1, 1, tzinfo=UTC),
+    )
+
+    assert report.processed_urls == 2
+    assert report.ingested_documents == 1
+    assert report.skipped_urls == 1
+    assert fetch_calls == [
+        "https://australiainstitute.org.au/report/new",
+        "https://australiainstitute.org.au/wp-content/new.pdf",
+    ]
 
 
 def test_checksum_change_appends_new_version(tmp_path: Path) -> None:

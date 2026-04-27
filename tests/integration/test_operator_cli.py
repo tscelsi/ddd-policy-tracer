@@ -353,3 +353,116 @@ def test_cli_supports_filesystem_repository_backend(tmp_path: Path) -> None:
         repository_backend="filesystem",
     )
     assert len(versions) == 1
+
+
+def test_cli_published_within_years_filters_old_entries(
+    tmp_path: Path,
+) -> None:
+    """Process only sitemap entries within the configured year window."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_path = tmp_path / "sitemap.xml"
+    sitemap_path.write_text(
+        """
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <url>
+            <loc>https://australiainstitute.org.au/report-recent</loc>
+            <lastmod>2026-01-01T00:00:00+00:00</lastmod>
+          </url>
+          <url>
+            <loc>https://australiainstitute.org.au/report-old</loc>
+            <lastmod>2019-01-01T00:00:00+00:00</lastmod>
+          </url>
+        </urlset>
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    output = StringIO()
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "australia_institute",
+            "--sitemap-xml-path",
+            str(sitemap_path),
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--published-within-years",
+            "2",
+        ],
+        fetch_document=lambda url: (
+            (
+                "text/html",
+                _report_html_with_pdf_link(
+                    "https://australiainstitute.org.au/wp-content/recent.pdf"
+                ),
+            )
+            if url.endswith("/report-recent")
+            else (
+                "application/pdf",
+                _build_pdf_with_text("Recent CLI content"),
+            )
+        ),
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    assert "processed_urls=2" in output.getvalue()
+    assert "skipped_urls=1" in output.getvalue()
+
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path,
+        source_id="australia_institute",
+    )
+    assert len(versions) == 1
+    assert versions[0].source_url.endswith("/report-recent")
+
+
+def test_cli_dry_run_includes_published_since_details(
+    tmp_path: Path,
+) -> None:
+    """Render publish-time filter details in dry-run output."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_path = tmp_path / "sitemap.xml"
+    sitemap_path.write_text(
+        """
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <url>
+            <loc>https://australiainstitute.org.au/report-1</loc>
+            <lastmod>2026-01-01T00:00:00+00:00</lastmod>
+          </url>
+        </urlset>
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    output = StringIO()
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "australia_institute",
+            "--sitemap-xml-path",
+            str(sitemap_path),
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--dry-run",
+            "--published-since",
+            "2025-01-01T00:00:00+00:00",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "dry_run" in rendered
+    assert "published_since=2025-01-01T00:00:00+00:00" in rendered

@@ -1,3 +1,7 @@
+## Status
+
+Closed: v1 scope in this PRD is implemented.
+
 ## Problem Statement
 
 We need a practical, well-architected data acquisition tool that can reliably collect policy-relevant documents from external publishers (starting with The Australia Institute), normalize extracted text into a consistent shape, and preserve provenance/history for future analysis. Today, there is no operationally simple pipeline that supports repeatable manual runs, versioned document history, and low-friction source onboarding without overengineering.

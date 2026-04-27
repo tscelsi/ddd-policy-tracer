@@ -75,6 +75,7 @@ def ingest_source_documents(
     backoff_seconds: Sequence[float] = (0.25, 0.5),
     sleep_fn: Callable[[float], None] = time.sleep,
     limit: int | None = None,
+    published_since: datetime | None = None,
 ) -> AcquisitionReport:
     """Ingest discovered URLs and return aggregate acquisition outcomes."""
     repository = _build_repository(
@@ -107,6 +108,13 @@ def ingest_source_documents(
     for entry in discovered_entries:
         source_url = entry.source_url
         processed_urls += 1
+
+        if not _is_entry_published_on_or_after(
+            entry_published_at=entry.published_at,
+            published_since=published_since,
+        ):
+            skipped_urls += 1
+            continue
 
         if not robots_checker(source_url, user_agent):
             skipped_urls += 1
@@ -317,3 +325,31 @@ def _build_repository(
 def _utc_now_isoformat() -> str:
     """Return the current UTC timestamp in ISO-8601 format."""
     return datetime.now(UTC).isoformat()
+
+
+def _is_entry_published_on_or_after(
+    *, entry_published_at: str | None, published_since: datetime | None
+) -> bool:
+    """Return true when an entry passes the optional publish-time filter."""
+    if published_since is None:
+        return True
+    if entry_published_at is None:
+        return False
+
+    entry_timestamp = _parse_iso_timestamp(entry_published_at)
+    if entry_timestamp is None:
+        return False
+    return entry_timestamp >= published_since
+
+
+def _parse_iso_timestamp(value: str) -> datetime | None:
+    """Parse one ISO timestamp into UTC, if valid."""
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
