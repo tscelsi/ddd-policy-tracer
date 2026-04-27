@@ -6,6 +6,7 @@ import inspect
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -14,7 +15,7 @@ from .adapters import (
     DiskArtifactStore,
     FilesystemSourceDocumentRepository,
     SQLiteSourceDocumentRepository,
-    discover_urls_from_sitemap,
+    discover_sitemap_entries,
     extract_pdf_urls_from_report_html,
     extract_text_from_pdf_bytes,
 )
@@ -99,11 +100,12 @@ def ingest_source_documents(
 
     robots_checker = is_allowed_by_robots or (lambda _url, _ua: True)
 
-    discovered_urls = discover_urls_from_sitemap(sitemap_xml)
+    discovered_entries = discover_sitemap_entries(sitemap_xml)
     if limit is not None:
-        discovered_urls = discovered_urls[: max(0, limit)]
+        discovered_entries = discovered_entries[: max(0, limit)]
 
-    for source_url in discovered_urls:
+    for entry in discovered_entries:
+        source_url = entry.source_url
         processed_urls += 1
 
         if not robots_checker(source_url, user_agent):
@@ -145,6 +147,7 @@ def ingest_source_documents(
             if pdf_content_type != "application/pdf":
                 raise ValueError("selected report file is not a PDF")
 
+            now = _utc_now_isoformat()
             extracted_text = extract_text_from_pdf_bytes(pdf_content)
             normalized = normalize_text(extracted_text)
             if not normalized:
@@ -169,10 +172,14 @@ def ingest_source_documents(
                 source_id=source_id,
                 source_document_id=source_document_id,
                 source_url=source_url,
+                published_at=entry.published_at,
+                retrieved_at=now,
                 checksum=checksum,
                 normalized_text=normalized,
                 raw_content_ref=raw_content_ref,
                 content_type=pdf_content_type,
+                created_at=now,
+                updated_at=now,
             )
             repository.add_version(version)
             ingested_documents += 1
@@ -305,3 +312,8 @@ def _build_repository(
     if repository_backend == "filesystem":
         return FilesystemSourceDocumentRepository(sqlite_path)
     return SQLiteSourceDocumentRepository(sqlite_path)
+
+
+def _utc_now_isoformat() -> str:
+    """Return the current UTC timestamp in ISO-8601 format."""
+    return datetime.now(UTC).isoformat()

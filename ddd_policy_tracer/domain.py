@@ -25,10 +25,14 @@ class SourceDocumentVersion:
     source_id: str
     source_document_id: str
     source_url: str
+    published_at: str | None
+    retrieved_at: str
     checksum: str
     normalized_text: str
     raw_content_ref: str
     content_type: str
+    created_at: str
+    updated_at: str
 
 
 def normalize_source_document_id(raw_url: str) -> str:

@@ -10,6 +10,10 @@
 | Source | An external publisher or provider from which documents are acquired. | Website, Feed (when referring to the organization) | No |
 | Australia Institute Source Adapter | The concrete adapter for discovering and retrieving Australia Institute documents from sitemap URLs. | Generic SourceProfile (for v1) | No |
 | Source Document | A source-scoped document record with identity, provenance, normalized text, status, and version history. | Canonical Document, Unified Document (v1) | No |
+| Published At (`published_at`) | Publication timestamp sourced from sitemap `<lastmod>` for the discovered source URL. | Content Publish Date (if not sourced from sitemap) | Yes (some sitemaps may be update times, not true publish times) |
+| Retrieved At (`retrieved_at`) | UTC timestamp when acquisition successfully fetched the document artifact for persistence. | Downloaded At (if ambiguously tied to retries) | No |
+| Created At (`created_at`) | UTC timestamp when a source document version record is first persisted. | Inserted At | No |
+| Updated At (`updated_at`) | UTC timestamp for the latest persistence update to a source document version record. | Modified At (without persistence context) | No |
 | Source Document Identity (`source_document_id`) | The normalized URL used as the stable identifier for a source document within a source. | Raw URL, Global Document ID | No |
 | Normalized URL | A URL transformed by v1 rules to remove non-semantic noise while preserving uniqueness-relevant parts. | Clean URL | Yes (query-param handling can evolve per source) |
 | Raw Content Artifact | The original fetched content (PDF, HTML, text) stored on disk. | Blob (if implying DB blob) | No |

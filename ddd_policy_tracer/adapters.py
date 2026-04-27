@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from datetime import datetime
 from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
@@ -14,6 +16,14 @@ from uuid import uuid4
 from pypdf import PdfReader
 
 from .domain import SourceDocumentVersion
+
+
+@dataclass(frozen=True)
+class DiscoveredSitemapEntry:
+    """Represent one sitemap URL entry and optional source publication time."""
+
+    source_url: str
+    published_at: str | None
 
 
 class SQLiteSourceDocumentRepository:
@@ -38,11 +48,14 @@ class SQLiteSourceDocumentRepository:
                     source_id TEXT NOT NULL,
                     source_document_id TEXT NOT NULL,
                     source_url TEXT NOT NULL,
+                    published_at TEXT,
+                    retrieved_at TEXT NOT NULL,
                     checksum TEXT NOT NULL,
                     normalized_text TEXT NOT NULL,
                     raw_content_ref TEXT NOT NULL,
                     content_type TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
                 """
             )
@@ -57,8 +70,9 @@ class SQLiteSourceDocumentRepository:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT source_id, source_document_id, source_url, checksum,
-                       normalized_text, raw_content_ref, content_type
+                SELECT source_id, source_document_id, source_url, published_at,
+                       retrieved_at, checksum, normalized_text,
+                       raw_content_ref, content_type, created_at, updated_at
                 FROM source_document_versions
                 WHERE source_id = ? AND source_document_id = ?
                 ORDER BY id DESC
@@ -78,18 +92,23 @@ class SQLiteSourceDocumentRepository:
             connection.execute(
                 """
                 INSERT INTO source_document_versions
-                (source_id, source_document_id, source_url, checksum,
-                 normalized_text, raw_content_ref, content_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (source_id, source_document_id, source_url, published_at,
+                 retrieved_at, checksum, normalized_text, raw_content_ref,
+                 content_type, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     version.source_id,
                     version.source_document_id,
                     version.source_url,
+                    version.published_at,
+                    version.retrieved_at,
                     version.checksum,
                     version.normalized_text,
                     version.raw_content_ref,
                     version.content_type,
+                    version.created_at,
+                    version.updated_at,
                 ),
             )
 
@@ -98,8 +117,9 @@ class SQLiteSourceDocumentRepository:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT source_id, source_document_id, source_url, checksum,
-                       normalized_text, raw_content_ref, content_type
+                SELECT source_id, source_document_id, source_url, published_at,
+                       retrieved_at, checksum, normalized_text,
+                       raw_content_ref, content_type, created_at, updated_at
                 FROM source_document_versions
                 WHERE source_id = ?
                 ORDER BY id ASC
@@ -142,10 +162,14 @@ class FilesystemSourceDocumentRepository:
             "source_id": version.source_id,
             "source_document_id": version.source_document_id,
             "source_url": version.source_url,
+            "published_at": version.published_at,
+            "retrieved_at": version.retrieved_at,
             "checksum": version.checksum,
             "normalized_text": version.normalized_text,
             "raw_content_ref": version.raw_content_ref,
             "content_type": version.content_type,
+            "created_at": version.created_at,
+            "updated_at": version.updated_at,
         }
         line = json.dumps(record, ensure_ascii=True)
         with self._state_path.open("a", encoding="utf-8") as handle:
@@ -175,10 +199,14 @@ class FilesystemSourceDocumentRepository:
                     source_id=payload["source_id"],
                     source_document_id=payload["source_document_id"],
                     source_url=payload["source_url"],
+                    published_at=payload["published_at"],
+                    retrieved_at=payload["retrieved_at"],
                     checksum=payload["checksum"],
                     normalized_text=payload["normalized_text"],
                     raw_content_ref=payload["raw_content_ref"],
                     content_type=payload["content_type"],
+                    created_at=payload["created_at"],
+                    updated_at=payload["updated_at"],
                 )
             )
         return versions
@@ -204,16 +232,81 @@ class DiskArtifactStore:
         return str(file_path)
 
 
-def discover_urls_from_sitemap(sitemap_xml: str) -> list[str]:
-    """Extract document URLs from a sitemap URL set XML payload."""
+def discover_sitemap_entries(
+    sitemap_xml: str,
+) -> list[DiscoveredSitemapEntry]:
+    """Extract URL entries with optional publication timestamps."""
     root = ET.fromstring(sitemap_xml)
     namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-    urls = [
-        node.text.strip()
-        for node in root.findall("sm:url/sm:loc", namespace)
-        if node.text
-    ]
-    return urls
+
+    entries_by_url: dict[str, DiscoveredSitemapEntry] = {}
+    for node in root.findall("sm:url", namespace):
+        loc_node = node.find("sm:loc", namespace)
+        if loc_node is None or loc_node.text is None:
+            continue
+
+        source_url = loc_node.text.strip()
+        lastmod_node = node.find("sm:lastmod", namespace)
+        published_at = None
+        if lastmod_node is not None and lastmod_node.text is not None:
+            candidate = lastmod_node.text.strip()
+            if _parse_timestamp(candidate) is not None:
+                published_at = candidate
+
+        existing = entries_by_url.get(source_url)
+        if existing is None:
+            entries_by_url[source_url] = DiscoveredSitemapEntry(
+                source_url=source_url,
+                published_at=published_at,
+            )
+            continue
+
+        if _is_newer_timestamp(
+            candidate_timestamp=published_at,
+            current_timestamp=existing.published_at,
+        ):
+            entries_by_url[source_url] = DiscoveredSitemapEntry(
+                source_url=source_url,
+                published_at=published_at,
+            )
+
+    return list(entries_by_url.values())
+
+
+def discover_urls_from_sitemap(sitemap_xml: str) -> list[str]:
+    """Extract document URLs from a sitemap URL set XML payload."""
+    return [entry.source_url for entry in discover_sitemap_entries(sitemap_xml)]
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    """Parse one sitemap timestamp value into a comparable datetime."""
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _is_newer_timestamp(
+    *, candidate_timestamp: str | None, current_timestamp: str | None
+) -> bool:
+    """Return true when candidate timestamp is newer than current value."""
+    candidate = (
+        _parse_timestamp(candidate_timestamp)
+        if candidate_timestamp is not None
+        else None
+    )
+    current = (
+        _parse_timestamp(current_timestamp)
+        if current_timestamp is not None
+        else None
+    )
+
+    if candidate is None:
+        return False
+    if current is None:
+        return True
+    return candidate > current
 
 
 class _ReportPdfLinkParser(HTMLParser):

@@ -54,6 +54,8 @@ def _report_html_with_pdf_link(pdf_url: str) -> bytes:
         f'<a href="{pdf_url}">Full report</a>'
     )
     return html.encode("utf-8")
+
+
 def test_ingest_from_sitemap_persists_first_source_document_version(
     tmp_path: Path,
 ) -> None:
@@ -62,7 +64,10 @@ def test_ingest_from_sitemap_persists_first_source_document_version(
     artifact_dir = tmp_path / "artifacts"
     sitemap_xml = """
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-      <url><loc>https://australiainstitute.org.au/report-1?utm_source=newsletter</loc></url>
+      <url>
+        <loc>https://australiainstitute.org.au/report-1?utm_source=newsletter</loc>
+        <lastmod>2026-04-24T10:12:30+00:00</lastmod>
+      </url>
     </urlset>
     """.strip()
 
@@ -105,9 +110,13 @@ def test_ingest_from_sitemap_persists_first_source_document_version(
         version.source_document_id
         == "https://australiainstitute.org.au/report-1"
     )
+    assert version.published_at == "2026-04-24T10:12:30+00:00"
+    assert version.retrieved_at
     assert version.normalized_text == "This is a report about policy reform."
     assert version.raw_content_ref.startswith(str(artifact_dir))
     assert Path(version.raw_content_ref).exists()
+    assert version.created_at
+    assert version.updated_at
 
 
 def test_reprocessing_same_unchanged_url_is_idempotent(tmp_path: Path) -> None:
@@ -205,6 +214,7 @@ def test_checksum_change_appends_new_version(tmp_path: Path) -> None:
     )
     assert len(versions) == 2
     assert versions[0].checksum != versions[1].checksum
+    assert versions[0].published_at is None
 
 
 def test_run_status_is_completed_with_failures_for_mixed_outcomes(

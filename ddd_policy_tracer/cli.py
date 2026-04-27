@@ -102,9 +102,12 @@ def _discover_urls_with_limit(
     *, sitemap_xml: str, limit: int | None
 ) -> list[str]:
     """Discover URLs from sitemap XML and apply an optional upper bound."""
-    from .adapters import discover_urls_from_sitemap
+    from .adapters import discover_sitemap_entries
 
-    urls = discover_urls_from_sitemap(sitemap_xml)
+    urls = [
+        entry.source_url
+        for entry in discover_sitemap_entries(sitemap_xml)
+    ]
     if limit is not None:
         return urls[: max(0, limit)]
     return urls
@@ -164,14 +167,35 @@ def _discover_child_sitemaps(sitemap_index_xml: str) -> list[str]:
 
 def _merge_urlsets(urlset_xml_documents: list[str]) -> str:
     """Merge URL set documents into one deduplicated URL set XML payload."""
-    urls: list[str] = []
-    for xml_text in urlset_xml_documents:
-        urls.extend(_discover_urls_with_limit(sitemap_xml=xml_text, limit=None))
+    from .adapters import discover_sitemap_entries
 
-    unique_urls = list(dict.fromkeys(urls))
+    merged_entries: dict[str, str | None] = {}
+    for xml_text in urlset_xml_documents:
+        for entry in discover_sitemap_entries(xml_text):
+            existing = merged_entries.get(entry.source_url)
+            if existing is None:
+                merged_entries[entry.source_url] = entry.published_at
+                continue
+
+            if entry.published_at is None:
+                continue
+            if existing is None or entry.published_at > existing:
+                merged_entries[entry.source_url] = entry.published_at
+
     lines = [
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-        *[f"  <url><loc>{url}</loc></url>" for url in unique_urls],
-        "</urlset>",
     ]
+    for url, published_at in merged_entries.items():
+        if published_at is None:
+            lines.append(f"  <url><loc>{url}</loc></url>")
+        else:
+            lines.append(
+                "  <url>"
+                f"<loc>{url}</loc>"
+                f"<lastmod>{published_at}</lastmod>"
+                "</url>"
+            )
+    lines.extend([
+        "</urlset>",
+    ])
     return "\n".join(lines)

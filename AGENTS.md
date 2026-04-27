@@ -155,6 +155,7 @@ Each PR or handoff should state:
 ## 12) Python environment and dependency management
 
 - Use `uv` as the only project and package manager for this repository.
+- Use `ruff` as the linter and `mypy` for type checking, both configured via `pyproject.toml`.
 - Prefer `uv run <command>` for all local execution (tests, lint, type checks, scripts).
 - Prefer `uv sync` for environment synchronization and lockfile-aware dependency installation.
 - When adding dependencies, use `uv add <package>` (and `uv add --dev <package>` for dev-only tools).

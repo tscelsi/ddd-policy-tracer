@@ -30,7 +30,7 @@
 ### Document Acquisition
 | Aggregate root | Purpose | Invariants | Consistency boundary |
 | --- | --- | --- | --- |
-| SourceDocument | Represent a source-scoped acquired document with versions, provenance, normalized text, and processing status. | `source_document_id` is normalized URL and stable within source; `done` requires non-empty `normalized_text` and no uncaught exceptions; each checksum change under same identity creates a new append-only version; each version must persist both `raw_content_ref` and normalized record. | Per source identity + version append operation.
+| SourceDocument | Represent a source-scoped acquired document with versions, provenance, normalized text, and processing status. | `source_document_id` is normalized URL and stable within source; `done` requires non-empty `normalized_text` and no uncaught exceptions; each checksum change under same identity creates a new append-only version; each version must persist both `raw_content_ref` and normalized record; each version should persist `published_at` from sitemap `<lastmod>` when available; each version persists audit timestamps (`retrieved_at`, `created_at`, `updated_at`). | Per source identity + version append operation.
 | AcquisitionRun | Represent a single manual execution boundary with outcome and counts. | Run has `source_id`, `started_at`; completion sets terminal run status (`completed`, `completed_with_failures`, `failed`) and `finished_at`; bulk ingestion allows partial per-URL success/failure. | Per run lifecycle and aggregate counters/status.
 
 ## Commands and domain events (candidates)

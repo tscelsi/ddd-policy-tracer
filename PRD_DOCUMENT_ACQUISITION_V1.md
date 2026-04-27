@@ -23,21 +23,22 @@ Build a v1 Document Acquisition system focused on orchestration and reliability 
 13. As a domain modeler, I want normalized URL identity (`source_document_id`), so that duplicate detection is stable.
 14. As a data engineer, I want tracking query params stripped but meaningful params retained, so that identity avoids noise without collisions.
 15. As a data engineer, I want append-only versioning on checksum change, so that document history is preserved.
-16. As a researcher, I want provenance fields (`retrieved_at`, source URL, fetch method), so that data lineage is auditable.
-17. As a researcher, I want raw artifacts retained on disk, so that extraction can be reproduced later.
-18. As a data engineer, I want raw artifact references stored in SQLite, so that metadata storage stays lightweight.
-19. As a product owner, I want minimal normalization only (no aggressive cleanup), so that we ship quickly and avoid semantic loss.
-20. As a product owner, I want a simple success criterion (non-empty `normalized_text`, no uncaught exceptions), so that status rules stay clear.
-21. As an operator, I want failed document attempts recorded with reason and retry count, so that troubleshooting is straightforward.
-22. As a system integrator, I want core events emitted for run start/completion and per-document success/failure, so that future workflows can subscribe cleanly.
-23. As an architect, I want clear ports for repository, artifact storage, fetcher, and parsers, so that adapters can evolve independently.
-24. As an architect, I want one bounded context in v1 (`Document Acquisition`), so that implementation remains focused.
-25. As a future contributor, I want a design that can add source #2 without rewriting core orchestration, so that onboarding remains fast.
-26. As a QA engineer, I want deterministic tests around identity normalization and versioning, so that regressions are caught early.
-27. As a QA engineer, I want service-layer tests with fakes for repositories and adapters, so that business behavior is verified quickly.
-28. As a policy analyst (future consumer), I want consistent `SourceDocument` output shape across inputs, so that analysis code does not need per-source logic.
-29. As a maintainer, I want parser fallback attempts and outcomes logged, so that extraction quality issues can be diagnosed.
-30. As an operator, I want skipped URLs counted and visible, so that allowlist tuning is evidence-based.
+16. As a researcher, I want provenance fields (`published_at`, `retrieved_at`, source URL, fetch method), so that data lineage is auditable.
+17. As a researcher, I want audit fields (`created_at`, `updated_at`) on persisted versions, so that record lifecycle is traceable.
+18. As a researcher, I want raw artifacts retained on disk, so that extraction can be reproduced later.
+19. As a data engineer, I want raw artifact references stored in SQLite, so that metadata storage stays lightweight.
+20. As a product owner, I want minimal normalization only (no aggressive cleanup), so that we ship quickly and avoid semantic loss.
+21. As a product owner, I want a simple success criterion (non-empty `normalized_text`, no uncaught exceptions), so that status rules stay clear.
+22. As an operator, I want failed document attempts recorded with reason and retry count, so that troubleshooting is straightforward.
+23. As a system integrator, I want core events emitted for run start/completion and per-document success/failure, so that future workflows can subscribe cleanly.
+24. As an architect, I want clear ports for repository, artifact storage, fetcher, and parsers, so that adapters can evolve independently.
+25. As an architect, I want one bounded context in v1 (`Document Acquisition`), so that implementation remains focused.
+26. As a future contributor, I want a design that can add source #2 without rewriting core orchestration, so that onboarding remains fast.
+27. As a QA engineer, I want deterministic tests around identity normalization and versioning, so that regressions are caught early.
+28. As a QA engineer, I want service-layer tests with fakes for repositories and adapters, so that business behavior is verified quickly.
+29. As a policy analyst (future consumer), I want consistent `SourceDocument` output shape across inputs, so that analysis code does not need per-source logic.
+30. As a maintainer, I want parser fallback attempts and outcomes logged, so that extraction quality issues can be diagnosed.
+31. As an operator, I want skipped URLs counted and visible, so that allowlist tuning is evidence-based.
 
 ## Implementation Decisions
 
@@ -50,6 +51,8 @@ Build a v1 Document Acquisition system focused on orchestration and reliability 
   - `done` requires non-empty `normalized_text` and no uncaught exceptions.
   - Changed checksum under same identity creates a new append-only version.
   - Each persisted version requires both normalized record and raw artifact reference.
+  - Each persisted version stores `published_at` from sitemap `<lastmod>` when available.
+  - Each persisted version stores audit timestamps (`retrieved_at`, `created_at`, `updated_at`).
 - Command model for orchestration:
   - `StartAcquisitionRun`
   - `BulkIngestSourceUrls`
@@ -65,6 +68,7 @@ Build a v1 Document Acquisition system focused on orchestration and reliability 
 - Source integration strategy for v1:
   - Concrete Australia Institute adapter.
   - Discovery via `sitemap.xml`.
+  - Sitemap `<lastmod>` maps directly to `published_at`.
   - Conservative URL allowlist/excludelist + content-type checks.
 - URL normalization strategy:
   - Normalize scheme/host casing.

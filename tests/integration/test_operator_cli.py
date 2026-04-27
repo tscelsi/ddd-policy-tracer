@@ -54,6 +54,8 @@ def _report_html_with_pdf_link(pdf_url: str) -> bytes:
         f'<a href="{pdf_url}">Full report</a>'
     )
     return html.encode("utf-8")
+
+
 def test_cli_runs_manual_acquisition_for_source_and_prints_result(
     tmp_path: Path,
 ) -> None:
@@ -239,7 +241,10 @@ def test_cli_can_resolve_sitemap_index_using_child_pattern(
     """.strip()
     child_report_xml = """
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-      <url><loc>https://australiainstitute.org.au/report-1</loc></url>
+      <url>
+        <loc>https://australiainstitute.org.au/report-1</loc>
+        <lastmod>2026-04-20T09:30:00+00:00</lastmod>
+      </url>
     </urlset>
     """.strip()
     child_page_xml = """
@@ -290,6 +295,7 @@ def test_cli_can_resolve_sitemap_index_using_child_pattern(
         sqlite_path=sqlite_path, source_id="australia_institute"
     )
     assert len(versions) == 1
+    assert versions[0].published_at == "2026-04-20T09:30:00+00:00"
 
 
 def test_cli_supports_filesystem_repository_backend(tmp_path: Path) -> None:
