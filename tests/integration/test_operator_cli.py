@@ -466,3 +466,424 @@ def test_cli_dry_run_includes_published_since_details(
     rendered = output.getvalue()
     assert "dry_run" in rendered
     assert "published_since=2025-01-01T00:00:00+00:00" in rendered
+
+
+def test_cli_lowy_requires_limit_or_publish_filter(
+    tmp_path: Path,
+) -> None:
+    """Require Lowy runs to include limit or published-time bounds."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    try:
+        run_cli(
+            [
+                "acquire",
+                "--source",
+                "lowy_institute",
+                "--sqlite-path",
+                str(sqlite_path),
+                "--artifact-dir",
+                str(artifact_dir),
+            ],
+            fetch_document=lambda _url: ("text/plain", b"unused"),
+            fetch_text_url=lambda _url, _ua: "",
+            stdout=output,
+        )
+    except ValueError as exc:
+        assert "requires either --limit or --published" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for unbounded Lowy run")
+
+
+def test_cli_lowy_dry_run_discovers_publication_urls_with_limit(
+    tmp_path: Path,
+) -> None:
+    """Discover Lowy listing URLs in dry-run and honor limit."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    listing_page = """
+    <html><body>
+      <article>
+        <a href="/publications/first-report">First</a>
+        <time datetime="2026-01-02T00:00:00+00:00">2 Jan 2026</time>
+      </article>
+      <article>
+        <a href="/publications/second-report">Second</a>
+        <time datetime="2026-01-01T00:00:00+00:00">1 Jan 2026</time>
+      </article>
+      <article>
+        <a href="/publications/third-report">Third</a>
+        <time datetime="2025-12-31T00:00:00+00:00">31 Dec 2025</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        if url.endswith("?page=0"):
+            return listing_page
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--limit",
+            "2",
+            "--dry-run",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "dry_run" in rendered
+    assert "source=lowy_institute" in rendered
+    assert "discovered_urls=2" in rendered
+
+
+def test_cli_lowy_dry_run_stops_after_first_older_dated_listing_item(
+    tmp_path: Path,
+) -> None:
+    """Stop Lowy pagination after crossing date cutoff."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+    fetched_urls: list[str] = []
+
+    listing_page_zero = """
+    <html><body>
+      <article>
+        <a href="/publications/new-report">New</a>
+        <time datetime="2025-06-01T00:00:00+00:00">1 June 2025</time>
+      </article>
+      <article>
+        <a href="/publications/old-report">Old</a>
+        <time datetime="2024-01-01T00:00:00+00:00">1 Jan 2024</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        fetched_urls.append(url)
+        if url.endswith("?page=0"):
+            return listing_page_zero
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--published-since",
+            "2025-01-01T00:00:00+00:00",
+            "--dry-run",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "discovered_urls=1" in rendered
+    assert fetched_urls == ["https://www.lowyinstitute.org/publications?page=0"]
+
+
+def test_cli_lowy_dry_run_continues_when_listing_item_is_undated(
+    tmp_path: Path,
+) -> None:
+    """Do not stop pagination early when boundary listing item is undated."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+    fetched_urls: list[str] = []
+
+    listing_page_zero = """
+    <html><body>
+      <article>
+        <a href="/publications/new-report">New</a>
+        <time datetime="2025-06-01T00:00:00+00:00">1 June 2025</time>
+      </article>
+      <article>
+        <a href="/publications/undated-report">Undated</a>
+      </article>
+    </body></html>
+    """.strip()
+
+    listing_page_one = """
+    <html><body>
+      <article>
+        <a href="/publications/old-report">Old</a>
+        <time datetime="2024-01-01T00:00:00+00:00">1 Jan 2024</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        fetched_urls.append(url)
+        if url.endswith("?page=0"):
+            return listing_page_zero
+        if url.endswith("?page=1"):
+            return listing_page_one
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--published-since",
+            "2025-01-01T00:00:00+00:00",
+            "--dry-run",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "discovered_urls=2" in rendered
+    assert fetched_urls == [
+        "https://www.lowyinstitute.org/publications?page=0",
+        "https://www.lowyinstitute.org/publications?page=1",
+    ]
+
+
+def test_cli_lowy_dry_run_uses_published_within_years_bound(
+    tmp_path: Path,
+) -> None:
+    """Apply published-within-years cutoff to Lowy listing discovery."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    listing_page_zero = """
+    <html><body>
+      <article>
+        <a href="/publications/recent-report">Recent</a>
+        <time datetime="2026-01-01T00:00:00+00:00">1 Jan 2026</time>
+      </article>
+      <article>
+        <a href="/publications/old-report">Old</a>
+        <time datetime="2020-01-01T00:00:00+00:00">1 Jan 2020</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        if url.endswith("?page=0"):
+            return listing_page_zero
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--published-within-years",
+            "2",
+            "--dry-run",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "source=lowy_institute" in rendered
+    assert "discovered_urls=1" in rendered
+    assert "published_since=" in rendered
+
+
+def test_cli_lowy_non_dry_run_uses_listing_discovery(
+    tmp_path: Path,
+) -> None:
+    """Run non-dry Lowy acquisition without sitemap arguments."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    listing_page_zero = """
+    <html><body>
+      <article>
+        <a href="/publications/first-report">First</a>
+        <time datetime="2026-01-01T00:00:00+00:00">1 Jan 2026</time>
+      </article>
+      <article>
+        <a href="/publications/second-report">Second</a>
+        <time datetime="2025-12-30T00:00:00+00:00">30 Dec 2025</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        if url.endswith("?page=0"):
+            return listing_page_zero
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--limit",
+            "2",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "source=lowy_institute" in rendered
+    assert "processed_urls=2" in rendered
+    assert "failed_documents=0" in rendered
+    assert "skipped_urls=2" in rendered
+
+
+def test_cli_lowy_non_dry_run_stops_on_older_dated_listing_item(
+    tmp_path: Path,
+) -> None:
+    """Bound Lowy non-dry discovery when dated listing crosses cutoff."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    listing_page_zero = """
+    <html><body>
+      <article>
+        <a href="/publications/new-report">New</a>
+        <time datetime="2025-06-01T00:00:00+00:00">1 June 2025</time>
+      </article>
+      <article>
+        <a href="/publications/old-report">Old</a>
+        <time datetime="2024-01-01T00:00:00+00:00">1 Jan 2024</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        if url.endswith("?page=0"):
+            return listing_page_zero
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--published-since",
+            "2025-01-01T00:00:00+00:00",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "source=lowy_institute" in rendered
+    assert "processed_urls=1" in rendered
+    assert "failed_documents=0" in rendered
+    assert "skipped_urls=1" in rendered
+
+
+def test_cli_lowy_non_dry_run_continues_when_listing_item_is_undated(
+    tmp_path: Path,
+) -> None:
+    """Continue Lowy non-dry pagination when boundary item lacks date."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+    fetched_urls: list[str] = []
+
+    listing_page_zero = """
+    <html><body>
+      <article>
+        <a href="/publications/new-report">New</a>
+        <time datetime="2025-06-01T00:00:00+00:00">1 June 2025</time>
+      </article>
+      <article>
+        <a href="/publications/undated-report">Undated</a>
+      </article>
+    </body></html>
+    """.strip()
+
+    listing_page_one = """
+    <html><body>
+      <article>
+        <a href="/publications/old-report">Old</a>
+        <time datetime="2024-01-01T00:00:00+00:00">1 Jan 2024</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        fetched_urls.append(url)
+        if url.endswith("?page=0"):
+            return listing_page_zero
+        if url.endswith("?page=1"):
+            return listing_page_one
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--published-since",
+            "2025-01-01T00:00:00+00:00",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch_text_url=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "source=lowy_institute" in rendered
+    assert "processed_urls=2" in rendered
+    assert "failed_documents=0" in rendered
+    assert "skipped_urls=2" in rendered
+    assert fetched_urls == [
+        "https://www.lowyinstitute.org/publications?page=0",
+        "https://www.lowyinstitute.org/publications?page=1",
+    ]

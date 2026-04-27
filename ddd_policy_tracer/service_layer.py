@@ -12,12 +12,10 @@ from typing import Literal
 from uuid import uuid4
 
 from .adapters import (
+    DiscoveredSitemapEntry,
     DiskArtifactStore,
     FilesystemSourceDocumentRepository,
     SQLiteSourceDocumentRepository,
-    discover_sitemap_entries,
-    extract_pdf_urls_from_report_html,
-    extract_text_from_pdf_bytes,
 )
 from .domain import (
     SourceDocumentVersion,
@@ -25,6 +23,7 @@ from .domain import (
     normalize_source_document_id,
     normalize_text,
 )
+from .source_strategies import SkipSourceDocumentError, get_source_strategy
 
 
 @dataclass(frozen=True)
@@ -76,12 +75,14 @@ def ingest_source_documents(
     sleep_fn: Callable[[float], None] = time.sleep,
     limit: int | None = None,
     published_since: datetime | None = None,
+    discovered_entries: list[DiscoveredSitemapEntry] | None = None,
 ) -> AcquisitionReport:
     """Ingest discovered URLs and return aggregate acquisition outcomes."""
     repository = _build_repository(
         sqlite_path=sqlite_path,
         repository_backend=repository_backend,
     )
+    source_strategy = get_source_strategy(source_id)
     artifact_store = DiskArtifactStore(artifact_dir)
 
     processed_urls = 0
@@ -101,11 +102,13 @@ def ingest_source_documents(
 
     robots_checker = is_allowed_by_robots or (lambda _url, _ua: True)
 
-    discovered_entries = discover_sitemap_entries(sitemap_xml)
+    entries = discovered_entries
+    if entries is None:
+        entries = source_strategy.discover_entries(sitemap_xml)
     if limit is not None:
-        discovered_entries = discovered_entries[: max(0, limit)]
+        entries = entries[: max(0, limit)]
 
-    for entry in discovered_entries:
+    for entry in entries:
         source_url = entry.source_url
         processed_urls += 1
 
@@ -123,45 +126,25 @@ def ingest_source_documents(
         source_document_id = normalize_source_document_id(source_url)
 
         try:
-            content_type, raw_content, used_retries = _fetch_with_retries(
-                fetch_document=fetch_document,
+            fetch_with_retries = _build_fetch_with_retries(
+                fetch_document=fetch_document
+            )
+            extracted = source_strategy.extract_document(
                 source_url=source_url,
                 user_agent=user_agent,
+                fetch_with_retries=fetch_with_retries,
                 max_retries=max_retries,
                 backoff_seconds=backoff_seconds,
                 sleep_fn=sleep_fn,
             )
-            retry_attempts += used_retries
-            if content_type != "text/html":
-                raise ValueError("report page must be HTML")
-
-            pdf_url = _select_pdf_url_from_report_html(
-                report_url=source_url,
-                report_html=raw_content,
-            )
-            (
-                pdf_content_type,
-                pdf_content,
-                pdf_retries,
-            ) = _fetch_with_retries(
-                fetch_document=fetch_document,
-                source_url=pdf_url,
-                user_agent=user_agent,
-                max_retries=max_retries,
-                backoff_seconds=backoff_seconds,
-                sleep_fn=sleep_fn,
-            )
-            retry_attempts += pdf_retries
-            if pdf_content_type != "application/pdf":
-                raise ValueError("selected report file is not a PDF")
+            retry_attempts += extracted.retry_attempts
 
             now = _utc_now_isoformat()
-            extracted_text = extract_text_from_pdf_bytes(pdf_content)
-            normalized = normalize_text(extracted_text)
+            normalized = normalize_text(extracted.extracted_text)
             if not normalized:
                 raise ValueError("normalized_text is empty")
 
-            checksum = compute_checksum(pdf_content)
+            checksum = compute_checksum(extracted.artifact_content)
             latest_version = repository.get_latest(
                 source_id=source_id,
                 source_document_id=source_document_id,
@@ -174,18 +157,18 @@ def ingest_source_documents(
 
             raw_content_ref = artifact_store.store(
                 source_document_id=source_document_id,
-                content=pdf_content,
+                content=extracted.artifact_content,
             )
             version = SourceDocumentVersion(
                 source_id=source_id,
                 source_document_id=source_document_id,
                 source_url=source_url,
-                published_at=entry.published_at,
+                published_at=extracted.published_at or entry.published_at,
                 retrieved_at=now,
                 checksum=checksum,
                 normalized_text=normalized,
                 raw_content_ref=raw_content_ref,
-                content_type=pdf_content_type,
+                content_type=extracted.artifact_content_type,
                 created_at=now,
                 updated_at=now,
             )
@@ -200,6 +183,9 @@ def ingest_source_documents(
                     source_document_id=source_document_id,
                 )
             )
+        except SkipSourceDocumentError:
+            skipped_urls += 1
+            continue
         except Exception as exc:
             failed_documents += 1
             document_failures.append(f"{source_url}: {exc}")
@@ -301,16 +287,6 @@ def _fetch_with_retries(
             retries_used += 1
 
 
-def _select_pdf_url_from_report_html(
-    *, report_url: str, report_html: bytes
-) -> str:
-    """Choose one PDF URL from a report page or raise when none exist."""
-    pdf_urls = extract_pdf_urls_from_report_html(report_url, report_html)
-    if not pdf_urls:
-        raise ValueError("no PDF links found on report page")
-    return pdf_urls[0]
-
-
 def _build_repository(
     *,
     sqlite_path: Path,
@@ -325,6 +301,34 @@ def _build_repository(
 def _utc_now_isoformat() -> str:
     """Return the current UTC timestamp in ISO-8601 format."""
     return datetime.now(UTC).isoformat()
+
+
+def _build_fetch_with_retries(
+    *, fetch_document: Callable[..., tuple[str, bytes]]
+) -> Callable[
+    [str, str, int, Sequence[float], Callable[[float], None]],
+    tuple[str, bytes, int],
+]:
+    """Build a source-strategy-compatible fetch wrapper with retries."""
+
+    def fetch_with_retries(
+        source_url: str,
+        user_agent: str,
+        max_retries: int,
+        backoff_seconds: Sequence[float],
+        sleep_fn: Callable[[float], None],
+    ) -> tuple[str, bytes, int]:
+        """Fetch one URL with retry controls provided by the caller."""
+        return _fetch_with_retries(
+            fetch_document=fetch_document,
+            source_url=source_url,
+            user_agent=user_agent,
+            max_retries=max_retries,
+            backoff_seconds=backoff_seconds,
+            sleep_fn=sleep_fn,
+        )
+
+    return fetch_with_retries
 
 
 def _is_entry_published_on_or_after(

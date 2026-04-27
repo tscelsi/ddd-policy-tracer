@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
@@ -24,6 +25,9 @@ class DiscoveredSitemapEntry:
 
     source_url: str
     published_at: str | None
+
+
+LOWY_PUBLICATIONS_BASE_URL = "https://www.lowyinstitute.org/publications"
 
 
 class SQLiteSourceDocumentRepository:
@@ -278,13 +282,91 @@ def discover_urls_from_sitemap(sitemap_xml: str) -> list[str]:
     return [entry.source_url for entry in discover_sitemap_entries(sitemap_xml)]
 
 
+def discover_lowy_listing_entries(
+    *,
+    fetch_text_url: Callable[[str, str], str],
+    user_agent: str,
+    published_since: datetime | None,
+    max_pages: int = 100,
+    max_documents: int | None = None,
+) -> tuple[list[DiscoveredSitemapEntry], int]:
+    """Discover Lowy publication entries from paginated listing pages."""
+    entries: list[DiscoveredSitemapEntry] = []
+    pages_scanned = 0
+
+    for page in range(max_pages):
+        listing_url = f"{LOWY_PUBLICATIONS_BASE_URL}?page={page}"
+        html_text = fetch_text_url(listing_url, user_agent)
+        page_entries = _parse_lowy_listing_entries(html_text)
+        pages_scanned += 1
+
+        if not page_entries:
+            break
+
+        for entry in page_entries:
+            if (
+                published_since is not None
+                and entry.published_at is not None
+                and _is_timestamp_older_than(
+                    timestamp=entry.published_at,
+                    cutoff=published_since,
+                )
+            ):
+                return entries, pages_scanned
+
+            entries.append(entry)
+            if max_documents is not None and len(entries) >= max_documents:
+                return entries, pages_scanned
+
+    deduped = _deduplicate_entries(entries)
+    return deduped, pages_scanned
+
+
+def _deduplicate_entries(
+    entries: list[DiscoveredSitemapEntry],
+) -> list[DiscoveredSitemapEntry]:
+    """Deduplicate discovered entries while retaining order."""
+    deduped: list[DiscoveredSitemapEntry] = []
+    seen_urls: set[str] = set()
+    for entry in entries:
+        if entry.source_url in seen_urls:
+            continue
+        seen_urls.add(entry.source_url)
+        deduped.append(entry)
+    return deduped
+
+
+def _is_timestamp_older_than(*, timestamp: str, cutoff: datetime) -> bool:
+    """Return true when one timestamp precedes the provided cutoff."""
+    parsed = _parse_timestamp(timestamp)
+    if parsed is None:
+        return False
+
+    if cutoff.tzinfo is None:
+        normalized_cutoff = cutoff.replace(tzinfo=UTC)
+    else:
+        normalized_cutoff = cutoff.astimezone(UTC)
+    return parsed < normalized_cutoff
+
+
+def _parse_lowy_listing_entries(html_text: str) -> list[DiscoveredSitemapEntry]:
+    """Parse Lowy listing HTML into publication entries."""
+    parser = _LowyListingParser()
+    parser.feed(html_text)
+    return parser.entries
+
+
 def _parse_timestamp(value: str) -> datetime | None:
     """Parse one sitemap timestamp value into a comparable datetime."""
     normalized = value.replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(normalized)
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _is_newer_timestamp(
@@ -348,6 +430,112 @@ class _ReportPdfLinkParser(HTMLParser):
         self.links.append((self._active_href, text))
         self._active_href = None
         self._active_text_parts = []
+
+
+@dataclass
+class _LowyListingCandidate:
+    """Track one listing candidate while parsing an article card."""
+
+    source_url: str | None = None
+    published_at: str | None = None
+
+
+class _LowyListingParser(HTMLParser):
+    """Parse publication links and dates from Lowy listing HTML."""
+
+    def __init__(self) -> None:
+        """Initialize parser state for one listing page."""
+        super().__init__()
+        self.entries: list[DiscoveredSitemapEntry] = []
+        self._article_depth = 0
+        self._candidate = _LowyListingCandidate()
+        self._capture_time_text = False
+        self._time_text_parts: list[str] = []
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        """Capture publication URL/date signals inside article cards."""
+        attr_map = dict(attrs)
+
+        if tag == "article":
+            self._article_depth += 1
+            if self._article_depth == 1:
+                self._candidate = _LowyListingCandidate()
+            return
+
+        if self._article_depth == 0:
+            return
+
+        if tag == "a" and self._candidate.source_url is None:
+            href = attr_map.get("href")
+            if href is None:
+                return
+            absolute_url = urljoin(LOWY_PUBLICATIONS_BASE_URL, href)
+            if _is_lowy_publication_detail_url(absolute_url):
+                self._candidate.source_url = absolute_url
+            return
+
+        if tag == "time":
+            datetime_attr = attr_map.get("datetime")
+            if datetime_attr is not None:
+                parsed = _parse_timestamp(datetime_attr.strip())
+                if parsed is not None:
+                    self._candidate.published_at = parsed.isoformat()
+                    return
+            self._capture_time_text = True
+            self._time_text_parts = []
+
+    def handle_data(self, data: str) -> None:
+        """Accumulate fallback date text inside time tags."""
+        if self._capture_time_text:
+            self._time_text_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        """Finalize candidates when leaving time/article tags."""
+        if tag == "time" and self._capture_time_text:
+            self._capture_time_text = False
+            if self._candidate.published_at is not None:
+                return
+            raw_text = " ".join(self._time_text_parts).strip()
+            parsed = _parse_lowy_human_date(raw_text)
+            if parsed is not None:
+                self._candidate.published_at = parsed
+            return
+
+        if tag == "article" and self._article_depth > 0:
+            if (
+                self._article_depth == 1
+                and self._candidate.source_url is not None
+            ):
+                self.entries.append(
+                    DiscoveredSitemapEntry(
+                        source_url=self._candidate.source_url,
+                        published_at=self._candidate.published_at,
+                    )
+                )
+            self._article_depth -= 1
+
+
+def _parse_lowy_human_date(raw_text: str) -> str | None:
+    """Parse Lowy human-readable date text into ISO-8601 UTC."""
+    normalized = " ".join(raw_text.split())
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.strptime(normalized, "%d %B %Y")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC).isoformat()
+
+
+def _is_lowy_publication_detail_url(url: str) -> bool:
+    """Return true for Lowy publication detail URLs."""
+    parsed = urlparse(url)
+    if parsed.netloc != "www.lowyinstitute.org":
+        return False
+    path_parts = [part for part in parsed.path.split("/") if part]
+    return len(path_parts) == 2 and path_parts[0] == "publications"
 
 
 def extract_pdf_urls_from_report_html(

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .service_layer import ingest_source_documents
+from .source_strategies import LowyInstituteSourceStrategy, get_source_strategy
 
 
 def run_cli(
@@ -54,7 +55,7 @@ def run_cli(
         required=True,
         help="Source identifier stored on every persisted document version.",
     )
-    sitemap_group = acquire_parser.add_mutually_exclusive_group(required=True)
+    sitemap_group = acquire_parser.add_mutually_exclusive_group(required=False)
     sitemap_group.add_argument(
         "--sitemap-xml-path",
         help="Path to a local sitemap XML file (urlset or sitemapindex).",
@@ -137,20 +138,49 @@ def run_cli(
         published_within_years=args.published_within_years,
     )
 
-    sitemap_xml, selected_sitemaps = _load_sitemap_xml(
+    _validate_source_constraints(
+        source=args.source,
         sitemap_xml_path=args.sitemap_xml_path,
         sitemap_url=args.sitemap_url,
-        child_sitemap_pattern=args.child_sitemap_pattern,
-        user_agent=args.user_agent,
-        fetch_text_url=fetch_text_url,
+        limit=args.limit,
+        published_since=published_since,
     )
 
-    if args.dry_run:
-        discovered = _discover_urls_with_limit(
-            sitemap_xml=sitemap_xml,
-            limit=args.limit,
-            published_since=published_since,
+    sitemap_xml = ""
+    selected_sitemaps = 0
+    if args.source != "lowy_institute":
+        sitemap_xml, selected_sitemaps = _load_sitemap_xml(
+            sitemap_xml_path=args.sitemap_xml_path,
+            sitemap_url=args.sitemap_url,
+            child_sitemap_pattern=args.child_sitemap_pattern,
+            user_agent=args.user_agent,
+            fetch_text_url=fetch_text_url,
         )
+
+    if args.dry_run:
+        if args.source == "lowy_institute":
+            strategy = get_source_strategy(args.source)
+            if not isinstance(strategy, LowyInstituteSourceStrategy):
+                raise ValueError("lowy_institute strategy is not available")
+            if fetch_text_url is None:
+                raise ValueError(
+                    "fetch_text_url is required for lowy_institute discovery"
+                )
+            discovered_entries, selected_sitemaps = (
+                strategy.discover_listing_entries(
+                    fetch_text_url=fetch_text_url,
+                    user_agent=args.user_agent,
+                    published_since=published_since,
+                    limit=args.limit,
+                )
+            )
+            discovered = [entry.source_url for entry in discovered_entries]
+        else:
+            discovered = _discover_urls_with_limit(
+                sitemap_xml=sitemap_xml,
+                limit=args.limit,
+                published_since=published_since,
+            )
         stdout.write(
             " ".join(
                 [
@@ -166,6 +196,24 @@ def run_cli(
         )
         return 0
 
+    pre_discovered_entries = None
+    if args.source == "lowy_institute":
+        strategy = get_source_strategy(args.source)
+        if not isinstance(strategy, LowyInstituteSourceStrategy):
+            raise ValueError("lowy_institute strategy is not available")
+        if fetch_text_url is None:
+            raise ValueError(
+                "fetch_text_url is required for lowy_institute discovery"
+            )
+        pre_discovered_entries, selected_sitemaps = (
+            strategy.discover_listing_entries(
+                fetch_text_url=fetch_text_url,
+                user_agent=args.user_agent,
+                published_since=published_since,
+                limit=args.limit,
+            )
+        )
+
     report = ingest_source_documents(
         source_id=args.source,
         sitemap_xml=sitemap_xml,
@@ -176,6 +224,7 @@ def run_cli(
         repository_backend=args.repository_backend,
         limit=args.limit,
         published_since=published_since,
+        discovered_entries=pre_discovered_entries,
     )
 
     stdout.write(
@@ -361,3 +410,27 @@ def _is_entry_published_on_or_after(
     if entry_timestamp is None:
         return False
     return entry_timestamp >= published_since
+
+
+def _validate_source_constraints(
+    *,
+    source: str,
+    sitemap_xml_path: str | None,
+    sitemap_url: str | None,
+    limit: int | None,
+    published_since: datetime | None,
+) -> None:
+    """Validate source-specific CLI constraints before execution."""
+    has_sitemap_input = sitemap_xml_path is not None or sitemap_url is not None
+
+    if source == "lowy_institute":
+        if limit is None and published_since is None:
+            raise ValueError(
+                "lowy_institute requires either --limit or --published-*"
+            )
+        return
+
+    if not has_sitemap_input:
+        raise ValueError(
+            "Either --sitemap-xml-path or --sitemap-url is required"
+        )

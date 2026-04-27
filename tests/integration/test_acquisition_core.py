@@ -15,6 +15,7 @@ from ddd_policy_tracer import (
     get_source_document_versions,
     ingest_source_documents,
 )
+from ddd_policy_tracer.adapters import DiscoveredSitemapEntry
 
 
 def _build_pdf_with_text(text: str) -> bytes:
@@ -118,6 +119,33 @@ def test_ingest_from_sitemap_persists_first_source_document_version(
     assert Path(version.raw_content_ref).exists()
     assert version.created_at
     assert version.updated_at
+
+
+def test_ingest_rejects_unknown_source_id(tmp_path: Path) -> None:
+    """Raise a clear error for unsupported source identifiers."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    sitemap_xml = """
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>https://example.org/report</loc></url>
+    </urlset>
+    """.strip()
+
+    def fetch_document(_: str) -> tuple[str, bytes]:
+        return "text/plain", b"unused"
+
+    try:
+        ingest_source_documents(
+            source_id="unknown_source",
+            sitemap_xml=sitemap_xml,
+            sqlite_path=sqlite_path,
+            artifact_dir=artifact_dir,
+            fetch_document=fetch_document,
+        )
+    except ValueError as exc:
+        assert "Unsupported source_id" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for unsupported source")
 
 
 def test_reprocessing_same_unchanged_url_is_idempotent(tmp_path: Path) -> None:
@@ -651,3 +679,275 @@ def test_filesystem_repository_persists_versions_without_sqlite(
     )
     assert len(versions) == 1
     assert "Filesystem content" in versions[0].normalized_text
+
+
+def test_lowy_ingests_html_publication_content_and_stores_html_artifact(
+    tmp_path: Path,
+) -> None:
+    """Persist Lowy publication HTML content when quality gates pass."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    discovered = [
+        DiscoveredSitemapEntry(
+            source_url="https://www.lowyinstitute.org/publications/sea-security",
+            published_at="2025-08-19T00:00:00+00:00",
+        )
+    ]
+    publication_html = """
+    <html>
+      <main>
+        <h1>Southeast Asia's evolving defence partnerships</h1>
+        <time datetime="2025-08-19T00:00:00+00:00">19 August 2025</time>
+        <p>Key Findings</p>
+        <p>{long_text}</p>
+        <h2>References</h2>
+        <p>[1] Evidence and context.</p>
+      </main>
+    </html>
+    """.strip().format(long_text=("Important sentence. " * 120))
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/publications/sea-security")
+        return "text/html", publication_html.encode("utf-8")
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=discovered,
+    )
+
+    assert report.processed_urls == 1
+    assert report.ingested_documents == 1
+    assert report.failed_documents == 0
+    assert report.skipped_urls == 0
+
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path,
+        source_id="lowy_institute",
+    )
+    assert len(versions) == 1
+    version = versions[0]
+    assert version.source_document_id.endswith("/publications/sea-security")
+    assert version.content_type == "text/html"
+    assert "Key Findings" in version.normalized_text
+    assert "References" in version.normalized_text
+    assert Path(version.raw_content_ref).read_bytes().startswith(b"<html>")
+
+
+def test_lowy_skips_page_with_short_content_or_missing_date(
+    tmp_path: Path,
+) -> None:
+    """Skip Lowy pages that fail article-date/length quality gates."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    shim_entries = [
+        DiscoveredSitemapEntry(
+            source_url="https://www.lowyinstitute.org/publications/short",
+            published_at="2025-08-19T00:00:00+00:00",
+        ),
+        DiscoveredSitemapEntry(
+            source_url="https://www.lowyinstitute.org/publications/no-date",
+            published_at="2025-08-20T00:00:00+00:00",
+        ),
+    ]
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        if url.endswith("/short"):
+            return (
+                "text/html",
+                (
+                    b"<html><main><time datetime='2025-08-19T00:00:00+00:00'>"
+                    b"</time><p>short</p></main></html>"
+                ),
+            )
+        if url.endswith("/no-date"):
+            return (
+                "text/html",
+                b"<html><main><p>" + (b"text " * 700) + b"</p></main></html>",
+            )
+        raise AssertionError(f"unexpected url fetched: {url}")
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=shim_entries,
+    )
+
+    assert report.processed_urls == 2
+    assert report.ingested_documents == 0
+    assert report.failed_documents == 0
+    assert report.skipped_urls == 2
+
+
+def test_lowy_drops_acknowledgements_from_normalized_text(
+    tmp_path: Path,
+) -> None:
+    """Exclude acknowledgements section while keeping core report content."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    entries = [
+        DiscoveredSitemapEntry(
+            source_url="https://www.lowyinstitute.org/publications/with-acks",
+            published_at="2025-08-19T00:00:00+00:00",
+        )
+    ]
+
+    html_bytes = (
+        b"<html><main><time datetime='2025-08-19T00:00:00+00:00'></time>"
+        b"<h1>Title</h1><p>"
+        + (b"Core analysis text. " * 120)
+        + b"</p><h2>Acknowledgements</h2><p>Team thanks everyone.</p>"
+        b"</main></html>"
+    )
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/with-acks")
+        return "text/html", html_bytes
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=entries,
+    )
+
+    assert report.ingested_documents == 1
+
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path,
+        source_id="lowy_institute",
+    )
+    assert len(versions) == 1
+    normalized_text = versions[0].normalized_text
+    assert "Core analysis text." in normalized_text
+    assert "Team thanks everyone." not in normalized_text
+
+
+def test_lowy_ingests_article_template_with_human_date_text(
+    tmp_path: Path,
+) -> None:
+    """Accept Lowy pages that expose date text without datetime attribute."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    entries = [
+        DiscoveredSitemapEntry(
+            source_url="https://www.lowyinstitute.org/publications/human-date",
+            published_at="2026-01-01T00:00:00+00:00",
+        )
+    ]
+
+    html_bytes = (
+        b"<html><article><h1>Title</h1><time>19 August 2025</time><p>"
+        + (b"Human date article text. " * 120)
+        + b"</p></article></html>"
+    )
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/human-date")
+        return "text/html", html_bytes
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=entries,
+    )
+
+    assert report.ingested_documents == 1
+
+
+def test_lowy_page_date_overrides_listing_hint_for_published_at(
+    tmp_path: Path,
+) -> None:
+    """Persist article-page publication date as canonical published_at."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    entries = [
+        DiscoveredSitemapEntry(
+            source_url="https://www.lowyinstitute.org/publications/date-override",
+            published_at="2024-01-01T00:00:00+00:00",
+        )
+    ]
+
+    html_bytes = (
+        b"<html><main><time datetime='2025-08-19T00:00:00+00:00'></time><p>"
+        + (b"Canonical date text. " * 120)
+        + b"</p></main></html>"
+    )
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/date-override")
+        return "text/html", html_bytes
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=entries,
+    )
+
+    assert report.ingested_documents == 1
+
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path,
+        source_id="lowy_institute",
+    )
+    assert len(versions) == 1
+    assert versions[0].published_at == "2025-08-19T00:00:00+00:00"
+
+
+def test_lowy_keeps_references_in_normalized_text(
+    tmp_path: Path,
+) -> None:
+    """Preserve references section content in normalized text output."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    entries = [
+        DiscoveredSitemapEntry(
+            source_url="https://www.lowyinstitute.org/publications/references",
+            published_at="2025-08-19T00:00:00+00:00",
+        )
+    ]
+
+    html_bytes = (
+        b"<html><main><time datetime='2025-08-19T00:00:00+00:00'></time>"
+        b"<h1>Title</h1><p>"
+        + (b"Main analysis body. " * 120)
+        + b"</p><h2>References</h2><p>[1] Useful citation.</p>"
+        b"</main></html>"
+    )
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/references")
+        return "text/html", html_bytes
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=entries,
+    )
+
+    assert report.ingested_documents == 1
+
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path,
+        source_id="lowy_institute",
+    )
+    assert len(versions) == 1
+    assert "References" in versions[0].normalized_text
+    assert "Useful citation." in versions[0].normalized_text
