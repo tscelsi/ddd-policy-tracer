@@ -29,6 +29,11 @@ def run_cli(
     sitemap_group.add_argument("--sitemap-url")
     acquire_parser.add_argument("--child-sitemap-pattern", default=None)
     acquire_parser.add_argument("--sqlite-path", required=True)
+    acquire_parser.add_argument(
+        "--repository-backend",
+        choices=["sqlite", "filesystem"],
+        default="sqlite",
+    )
     acquire_parser.add_argument("--artifact-dir", required=True)
     acquire_parser.add_argument("--user-agent", default="ddd-policy-tracer/0.1")
     acquire_parser.add_argument("--limit", type=int, default=None)
@@ -73,6 +78,7 @@ def run_cli(
         artifact_dir=Path(args.artifact_dir),
         fetch_document=fetch_document,
         user_agent=args.user_agent,
+        repository_backend=args.repository_backend,
         limit=args.limit,
     )
 

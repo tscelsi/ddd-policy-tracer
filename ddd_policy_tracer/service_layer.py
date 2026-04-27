@@ -12,8 +12,11 @@ from uuid import uuid4
 
 from .adapters import (
     DiskArtifactStore,
+    FilesystemSourceDocumentRepository,
     SQLiteSourceDocumentRepository,
     discover_urls_from_sitemap,
+    extract_pdf_urls_from_report_html,
+    extract_text_from_pdf_bytes,
 )
 from .domain import (
     SourceDocumentVersion,
@@ -65,6 +68,7 @@ def ingest_source_documents(
     artifact_dir: Path,
     fetch_document: Callable[..., tuple[str, bytes]],
     user_agent: str = "ddd-policy-tracer/0.1",
+    repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
     is_allowed_by_robots: Callable[[str, str], bool] | None = None,
     max_retries: int = 2,
     backoff_seconds: Sequence[float] = (0.25, 0.5),
@@ -72,7 +76,10 @@ def ingest_source_documents(
     limit: int | None = None,
 ) -> AcquisitionReport:
     """Ingest discovered URLs and return aggregate acquisition outcomes."""
-    repository = SQLiteSourceDocumentRepository(sqlite_path)
+    repository = _build_repository(
+        sqlite_path=sqlite_path,
+        repository_backend=repository_backend,
+    )
     artifact_store = DiskArtifactStore(artifact_dir)
 
     processed_urls = 0
@@ -115,12 +122,35 @@ def ingest_source_documents(
                 sleep_fn=sleep_fn,
             )
             retry_attempts += used_retries
-            extracted_text = raw_content.decode("utf-8", errors="ignore")
+            if content_type != "text/html":
+                raise ValueError("report page must be HTML")
+
+            pdf_url = _select_pdf_url_from_report_html(
+                report_url=source_url,
+                report_html=raw_content,
+            )
+            (
+                pdf_content_type,
+                pdf_content,
+                pdf_retries,
+            ) = _fetch_with_retries(
+                fetch_document=fetch_document,
+                source_url=pdf_url,
+                user_agent=user_agent,
+                max_retries=max_retries,
+                backoff_seconds=backoff_seconds,
+                sleep_fn=sleep_fn,
+            )
+            retry_attempts += pdf_retries
+            if pdf_content_type != "application/pdf":
+                raise ValueError("selected report file is not a PDF")
+
+            extracted_text = extract_text_from_pdf_bytes(pdf_content)
             normalized = normalize_text(extracted_text)
             if not normalized:
                 raise ValueError("normalized_text is empty")
 
-            checksum = compute_checksum(raw_content)
+            checksum = compute_checksum(pdf_content)
             latest_version = repository.get_latest(
                 source_id=source_id,
                 source_document_id=source_document_id,
@@ -133,7 +163,7 @@ def ingest_source_documents(
 
             raw_content_ref = artifact_store.store(
                 source_document_id=source_document_id,
-                content=raw_content,
+                content=pdf_content,
             )
             version = SourceDocumentVersion(
                 source_id=source_id,
@@ -142,7 +172,7 @@ def ingest_source_documents(
                 checksum=checksum,
                 normalized_text=normalized,
                 raw_content_ref=raw_content_ref,
-                content_type=content_type,
+                content_type=pdf_content_type,
             )
             repository.add_version(version)
             ingested_documents += 1
@@ -203,9 +233,13 @@ def get_source_document_versions(
     *,
     sqlite_path: Path,
     source_id: str,
+    repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
 ) -> list[SourceDocumentVersion]:
     """Load persisted source document versions for one source."""
-    repository = SQLiteSourceDocumentRepository(sqlite_path)
+    repository = _build_repository(
+        sqlite_path=sqlite_path,
+        repository_backend=repository_backend,
+    )
     return repository.list_versions(source_id=source_id)
 
 
@@ -250,3 +284,24 @@ def _fetch_with_retries(
             delay = backoff_seconds[delay_index] if backoff_seconds else 0.0
             sleep_fn(delay)
             retries_used += 1
+
+
+def _select_pdf_url_from_report_html(
+    *, report_url: str, report_html: bytes
+) -> str:
+    """Choose one PDF URL from a report page or raise when none exist."""
+    pdf_urls = extract_pdf_urls_from_report_html(report_url, report_html)
+    if not pdf_urls:
+        raise ValueError("no PDF links found on report page")
+    return pdf_urls[0]
+
+
+def _build_repository(
+    *,
+    sqlite_path: Path,
+    repository_backend: Literal["sqlite", "filesystem"],
+) -> SQLiteSourceDocumentRepository | FilesystemSourceDocumentRepository:
+    """Build the configured repository adapter for source versions."""
+    if repository_backend == "filesystem":
+        return FilesystemSourceDocumentRepository(sqlite_path)
+    return SQLiteSourceDocumentRepository(sqlite_path)

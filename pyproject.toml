@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "DDD-first policy document acquisition prototype"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pypdf>=6.10.2",
+]
 
 [dependency-groups]
 dev = [
