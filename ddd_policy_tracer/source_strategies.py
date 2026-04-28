@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import abc
 import re
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,12 +12,14 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 from .adapters import (
-    DiscoveredSitemapEntry,
+    DiscoveredDocument,
     discover_lowy_listing_entries,
     discover_sitemap_entries,
     extract_pdf_urls_from_report_html,
     extract_text_from_pdf_bytes,
 )
+
+USER_AGENT: str = "ddd-policy-tracer/0.1"
 
 
 @dataclass(frozen=True)
@@ -33,15 +37,77 @@ class SkipSourceDocumentError(Exception):
     """Signal that one discovered URL should be skipped, not failed."""
 
 
+class AbstractSourceStrategy(abc.ABC):
+    """ABC for source-specific discovery and extraction strategies.
+
+    Exposes a common interface for the acquisition CLI to interact with
+    different sources without needing to know source-specific details. Each
+    strategy is responsible for implementing the discovery and extraction.
+    """
+
+    @abc.abstractmethod
+    def discover_documents(
+        self,
+        *,
+        fetch: Callable[[str, str], str],
+        published_since: datetime | None,
+        limit: int | None,
+    ) -> tuple[list[DiscoveredDocument], int]:
+        """Discover one or more document URLs from a source."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def extract_document(
+        self,
+        *,
+        source_url: str,
+        user_agent: str,
+        fetch_with_retries: Callable[
+            [str, str, int, Sequence[float], Callable[[float], None]],
+            tuple[str, bytes, int],
+        ],
+        max_retries: int,
+        backoff_seconds: Sequence[float],
+        sleep_fn: Callable[[float], None],
+    ) -> ExtractedSourceDocument:
+        """Fetch and extract one document from a source-specific URL."""
+        raise NotImplementedError
+
+
 @dataclass(frozen=True)
-class AustraliaInstituteSourceStrategy:
+class AustraliaInstituteSourceStrategy(AbstractSourceStrategy):
     """Discover and extract Australia Institute report content from PDFs."""
 
-    def discover_entries(
-        self, sitemap_xml: str
-    ) -> list[DiscoveredSitemapEntry]:
+    URL: str = "https://australiainstitute.org.au/sitemap_index.xml"
+    CHILD_PATTERN: str = "tai_cpt_report-sitemap"
+
+    def discover_documents(
+        self,
+        *,
+        fetch: Callable[[str, str], str],
+        published_since: datetime | None,
+        limit: int | None,
+    ) -> tuple[list[DiscoveredDocument], int]:
         """Discover candidate report URLs from sitemap XML."""
-        return discover_sitemap_entries(sitemap_xml)
+        selected_sitemaps = 1
+        payload, selected_sitemaps = _load_sitemap_discovery_payload(
+            discovery_url=self.URL,
+            discovery_child_pattern=self.CHILD_PATTERN,
+            user_agent=USER_AGENT,
+            fetch=fetch,
+        )
+
+        entries = [
+            entry
+            for entry in discover_sitemap_entries(payload)
+            if _is_entry_published_on_or_after(
+                entry_published_at=entry.published_at,
+                published_since=published_since,
+            )
+        ]
+        if limit is not None:
+            entries = entries[: max(0, limit)]
+        return entries, selected_sitemaps
 
     def extract_document(
         self,
@@ -92,7 +158,7 @@ class AustraliaInstituteSourceStrategy:
 
 def get_source_strategy(
     source_id: str,
-) -> AustraliaInstituteSourceStrategy | LowyInstituteSourceStrategy:
+) -> AbstractSourceStrategy:
     """Resolve the configured source strategy or raise for unsupported IDs."""
     if source_id == "australia_institute":
         return AustraliaInstituteSourceStrategy()
@@ -102,27 +168,20 @@ def get_source_strategy(
 
 
 @dataclass(frozen=True)
-class LowyInstituteSourceStrategy:
+class LowyInstituteSourceStrategy(AbstractSourceStrategy):
     """Discover Lowy listing entries while extraction is not yet implemented."""
 
-    def discover_entries(
-        self, sitemap_xml: str
-    ) -> list[DiscoveredSitemapEntry]:
-        """Reject sitemap XML discovery for Lowy strategy."""
-        raise ValueError("lowy_institute discovery requires listing crawl")
-
-    def discover_listing_entries(
+    def discover_documents(
         self,
         *,
-        fetch_text_url: Callable[[str, str], str],
-        user_agent: str,
+        fetch: Callable[[str, str], str],
         published_since: datetime | None,
         limit: int | None,
-    ) -> tuple[list[DiscoveredSitemapEntry], int]:
+    ) -> tuple[list[DiscoveredDocument], int]:
         """Discover Lowy publication entries from listing pages."""
         return discover_lowy_listing_entries(
-            fetch_text_url=fetch_text_url,
-            user_agent=user_agent,
+            fetch=fetch,
+            user_agent=USER_AGENT,
             published_since=published_since,
             max_documents=limit,
         )
@@ -154,9 +213,7 @@ class LowyInstituteSourceStrategy:
             sleep_fn,
         )
         if content_type != "text/html":
-            raise SkipSourceDocumentError(
-                "Lowy publication page must be HTML"
-            )
+            raise SkipSourceDocumentError("Lowy publication page must be HTML")
 
         html_text = raw_content.decode("utf-8", errors="ignore")
         page_published_at = _extract_lowy_article_published_at(html_text)
@@ -335,3 +392,92 @@ def _is_lowy_publication_detail_url(url: str) -> bool:
     if not path.startswith("publications/"):
         return False
     return len(path.split("/")) == 2
+
+
+def _is_entry_published_on_or_after(
+    *, entry_published_at: str | None, published_since: datetime | None
+) -> bool:
+    """Return true when an entry passes the optional publish-time filter."""
+    if published_since is None:
+        return True
+    if entry_published_at is None:
+        return False
+
+    entry_timestamp = _parse_iso_timestamp(entry_published_at)
+    if entry_timestamp is None:
+        return False
+    return entry_timestamp >= published_since
+
+
+def _load_sitemap_discovery_payload(
+    *,
+    discovery_url: str,
+    discovery_child_pattern: str | None,
+    user_agent: str,
+    fetch: Callable[[str, str], str],
+) -> tuple[str, int]:
+    """Load discovery payload from local file or sitemap URL sources."""
+    root_xml = fetch(discovery_url, user_agent)
+    if _is_sitemap_index(root_xml):
+        child_sitemaps = _discover_child_sitemaps(root_xml)
+        if discovery_child_pattern is not None:
+            child_sitemaps = [
+                url for url in child_sitemaps if discovery_child_pattern in url
+            ]
+        child_urlsets = [fetch(url, user_agent) for url in child_sitemaps]
+        return _merge_urlsets(child_urlsets), len(child_sitemaps)
+
+    return root_xml, 1
+
+
+def _is_sitemap_index(xml_text: str) -> bool:
+    """Return true when one XML payload is a sitemap index."""
+    root = ET.fromstring(xml_text)
+    return root.tag.endswith("sitemapindex")
+
+
+def _discover_child_sitemaps(sitemap_index_xml: str) -> list[str]:
+    """Extract child sitemap URLs from one sitemap index payload."""
+    root = ET.fromstring(sitemap_index_xml)
+    namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    return [
+        node.text.strip()
+        for node in root.findall("sm:sitemap/sm:loc", namespace)
+        if node.text
+    ]
+
+
+def _merge_urlsets(urlset_xml_documents: list[str]) -> str:
+    """Merge URL set XML documents into one deduplicated payload."""
+    merged_entries: dict[str, str | None] = {}
+    for xml_text in urlset_xml_documents:
+        for entry in discover_sitemap_entries(xml_text):
+            existing = merged_entries.get(entry.source_url)
+            if existing is None:
+                merged_entries[entry.source_url] = entry.published_at
+                continue
+
+            if entry.published_at is None:
+                continue
+            if existing is None or entry.published_at > existing:
+                merged_entries[entry.source_url] = entry.published_at
+
+    lines = [
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for url, published_at in merged_entries.items():
+        if published_at is None:
+            lines.append(f"  <url><loc>{url}</loc></url>")
+        else:
+            lines.append(
+                "  <url>"
+                f"<loc>{url}</loc>"
+                f"<lastmod>{published_at}</lastmod>"
+                "</url>"
+            )
+    lines.extend(
+        [
+            "</urlset>",
+        ]
+    )
+    return "\n".join(lines)

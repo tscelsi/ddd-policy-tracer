@@ -5,6 +5,7 @@ from __future__ import annotations
 from io import BytesIO, StringIO
 from pathlib import Path
 
+import pytest
 from pypdf import PdfWriter
 from pypdf.generic import (
     DecodedStreamObject,
@@ -31,11 +32,7 @@ def _build_pdf_with_text(text: str) -> bytes:
     font_ref = writer._add_object(font)
 
     page[NameObject("/Resources")] = DictionaryObject(
-        {
-            NameObject("/Font"): DictionaryObject(
-                {NameObject("/F1"): font_ref}
-            )
-        }
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
     )
 
     stream = DecodedStreamObject()
@@ -284,7 +281,7 @@ def test_cli_can_resolve_sitemap_index_using_child_pattern(
             if url.endswith("/report-1")
             else ("application/pdf", _build_pdf_with_text("index-based run"))
         ),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -488,7 +485,7 @@ def test_cli_lowy_requires_limit_or_publish_filter(
                 str(artifact_dir),
             ],
             fetch_document=lambda _url: ("text/plain", b"unused"),
-            fetch_text_url=lambda _url, _ua: "",
+            fetch=lambda _url, _ua: "",
             stdout=output,
         )
     except ValueError as exc:
@@ -541,7 +538,7 @@ def test_cli_lowy_dry_run_discovers_publication_urls_with_limit(
             "--dry-run",
         ],
         fetch_document=lambda _url: ("text/plain", b"unused"),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -594,7 +591,7 @@ def test_cli_lowy_dry_run_stops_after_first_older_dated_listing_item(
             "--dry-run",
         ],
         fetch_document=lambda _url: ("text/plain", b"unused"),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -656,7 +653,7 @@ def test_cli_lowy_dry_run_continues_when_listing_item_is_undated(
             "--dry-run",
         ],
         fetch_document=lambda _url: ("text/plain", b"unused"),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -709,7 +706,7 @@ def test_cli_lowy_dry_run_uses_published_within_years_bound(
             "--dry-run",
         ],
         fetch_document=lambda _url: ("text/plain", b"unused"),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -759,7 +756,7 @@ def test_cli_lowy_non_dry_run_uses_listing_discovery(
             "2",
         ],
         fetch_document=lambda _url: ("text/plain", b"unused"),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -810,7 +807,7 @@ def test_cli_lowy_non_dry_run_stops_on_older_dated_listing_item(
             "2025-01-01T00:00:00+00:00",
         ],
         fetch_document=lambda _url: ("text/plain", b"unused"),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -873,7 +870,7 @@ def test_cli_lowy_non_dry_run_continues_when_listing_item_is_undated(
             "2025-01-01T00:00:00+00:00",
         ],
         fetch_document=lambda _url: ("text/plain", b"unused"),
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=output,
     )
 
@@ -887,3 +884,157 @@ def test_cli_lowy_non_dry_run_continues_when_listing_item_is_undated(
         "https://www.lowyinstitute.org/publications?page=0",
         "https://www.lowyinstitute.org/publications?page=1",
     ]
+
+
+def test_cli_help_documents_lowy_discovery_and_guardrails(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Describe Lowy listing discovery and required guardrails in help."""
+    output = StringIO()
+
+    try:
+        run_cli(
+            ["acquire", "--help"],
+            fetch_document=lambda _url: ("text/plain", b"unused"),
+            fetch=lambda _url, _ua: "",
+            stdout=output,
+        )
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("Expected SystemExit for --help")
+
+    rendered = capsys.readouterr().out
+    assert "lowy_institute" in rendered
+    assert "requires --limit or --published-*" in rendered
+    assert "/publications?page=N" in rendered
+
+
+def test_cli_australia_requires_sitemap_source_inputs(
+    tmp_path: Path,
+) -> None:
+    """Require Australia runs to provide sitemap path or sitemap URL."""
+    state_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    with pytest.raises(ValueError) as exc_info:
+        run_cli(
+            [
+                "acquire",
+                "--source",
+                "australia_institute",
+                "--state-path",
+                str(state_path),
+                "--artifact-dir",
+                str(artifact_dir),
+            ],
+            fetch_document=lambda _url: ("text/plain", b"unused"),
+            stdout=output,
+        )
+
+    assert "--sitemap-xml-path or --sitemap-url" in str(exc_info.value)
+
+
+def test_cli_lowy_dry_run_prints_bounded_discovery_context(
+    tmp_path: Path,
+) -> None:
+    """Render Lowy dry-run context fields for bounded listing discovery."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    listing_page = """
+    <html><body>
+      <article>
+        <a href="/publications/report-1">One</a>
+        <time datetime="2026-01-01T00:00:00+00:00">1 Jan 2026</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        if url.endswith("?page=0"):
+            return listing_page
+        return "<html><body></body></html>"
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--published-since",
+            "2025-01-01T00:00:00+00:00",
+            "--dry-run",
+        ],
+        fetch_document=lambda _url: ("text/plain", b"unused"),
+        fetch=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "dry_run" in rendered
+    assert "source=lowy_institute" in rendered
+    assert "discovery=lowy_publications_listing" in rendered
+    assert "url_scope=/publications/*" in rendered
+    assert "pages_scanned=2" in rendered
+    assert "published_since=2025-01-01T00:00:00+00:00" in rendered
+
+
+def test_cli_lowy_non_dry_run_emits_explicit_skip_reasons(
+    tmp_path: Path,
+) -> None:
+    """Print actionable Lowy skip reasons for excluded pages."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    output = StringIO()
+
+    listing_page = """
+    <html><body>
+      <article>
+        <a href="/publications/short">Short</a>
+        <time datetime="2026-01-01T00:00:00+00:00">1 Jan 2026</time>
+      </article>
+    </body></html>
+    """.strip()
+
+    def fetch_text_url(url: str, _user_agent: str) -> str:
+        if url.endswith("?page=0"):
+            return listing_page
+        return "<html><body></body></html>"
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/publications/short")
+        return (
+            "text/html",
+            b"<html><main><time datetime='2026-01-01T00:00:00+00:00'></time>"
+            b"<p>too short</p></main></html>",
+        )
+
+    exit_code = run_cli(
+        [
+            "acquire",
+            "--source",
+            "lowy_institute",
+            "--sqlite-path",
+            str(sqlite_path),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--limit",
+            "1",
+        ],
+        fetch_document=fetch_document,
+        fetch=fetch_text_url,
+        stdout=output,
+    )
+
+    assert exit_code == 0
+    rendered = output.getvalue()
+    assert "skipped_urls=1" in rendered
+    assert "skip_reason" in rendered
+    assert "below 1500 char threshold" in rendered

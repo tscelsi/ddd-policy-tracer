@@ -12,7 +12,7 @@ from typing import Literal
 from uuid import uuid4
 
 from .adapters import (
-    DiscoveredSitemapEntry,
+    DiscoveredDocument,
     DiskArtifactStore,
     FilesystemSourceDocumentRepository,
     SQLiteSourceDocumentRepository,
@@ -24,6 +24,9 @@ from .domain import (
     normalize_text,
 )
 from .source_strategies import SkipSourceDocumentError, get_source_strategy
+from .utils.logger import get_logger
+
+LOGGER = get_logger(__name__, ctx="service_layer")
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class AcquisitionReport:
     skipped_urls: int
     retry_attempts: int
     document_failures: tuple[str, ...]
+    skipped_reasons: tuple[str, ...]
     events: tuple[AcquisitionEvent, ...]
     run_status: Literal["completed", "completed_with_failures", "failed"]
 
@@ -63,23 +67,19 @@ class AcquisitionEvent:
 def ingest_source_documents(
     *,
     source_id: str,
-    sitemap_xml: str,
-    sqlite_path: Path,
     artifact_dir: Path,
+    discovered_documents: list[DiscoveredDocument],
     fetch_document: Callable[..., tuple[str, bytes]],
+    state_path: Path | None = None,
     user_agent: str = "ddd-policy-tracer/0.1",
     repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
-    is_allowed_by_robots: Callable[[str, str], bool] | None = None,
     max_retries: int = 2,
     backoff_seconds: Sequence[float] = (0.25, 0.5),
     sleep_fn: Callable[[float], None] = time.sleep,
-    limit: int | None = None,
-    published_since: datetime | None = None,
-    discovered_entries: list[DiscoveredSitemapEntry] | None = None,
 ) -> AcquisitionReport:
     """Ingest discovered URLs and return aggregate acquisition outcomes."""
     repository = _build_repository(
-        sqlite_path=sqlite_path,
+        state_path=state_path,
         repository_backend=repository_backend,
     )
     source_strategy = get_source_strategy(source_id)
@@ -91,7 +91,9 @@ def ingest_source_documents(
     skipped_urls = 0
     retry_attempts = 0
     document_failures: list[str] = []
+    skipped_reasons: list[str] = []
     run_id = str(uuid4())
+    run_logger = LOGGER.bind(run_id=run_id, source_id=source_id)
     events: list[AcquisitionEvent] = [
         AcquisitionEvent(
             event_type="AcquisitionRunStarted",
@@ -99,31 +101,20 @@ def ingest_source_documents(
             source_id=source_id,
         )
     ]
+    run_logger.info(
+        "acquisition run started backend=%s doc_count=%s",
+        repository_backend,
+        len(discovered_documents),
+    )
 
-    robots_checker = is_allowed_by_robots or (lambda _url, _ua: True)
-
-    entries = discovered_entries
-    if entries is None:
-        entries = source_strategy.discover_entries(sitemap_xml)
-    if limit is not None:
-        entries = entries[: max(0, limit)]
-
-    for entry in entries:
+    for entry in discovered_documents:
         source_url = entry.source_url
         processed_urls += 1
-
-        if not _is_entry_published_on_or_after(
-            entry_published_at=entry.published_at,
-            published_since=published_since,
-        ):
-            skipped_urls += 1
-            continue
-
-        if not robots_checker(source_url, user_agent):
-            skipped_urls += 1
-            continue
+        entry_logger = run_logger.bind(source_url=source_url)
+        entry_logger.debug("processing discovered entry")
 
         source_document_id = normalize_source_document_id(source_url)
+        entry_logger = entry_logger.bind(source_document_id=source_document_id)
 
         try:
             fetch_with_retries = _build_fetch_with_retries(
@@ -153,6 +144,7 @@ def ingest_source_documents(
                 latest_version is not None
                 and latest_version.checksum == checksum
             ):
+                entry_logger.info("no-op: checksum unchanged")
                 continue
 
             raw_content_ref = artifact_store.store(
@@ -174,6 +166,11 @@ def ingest_source_documents(
             )
             repository.add_version(version)
             ingested_documents += 1
+            entry_logger.info(
+                "ingested version content_type=%s retries=%s",
+                extracted.artifact_content_type,
+                extracted.retry_attempts,
+            )
             events.append(
                 AcquisitionEvent(
                     event_type="SourceDocumentIngested",
@@ -183,12 +180,15 @@ def ingest_source_documents(
                     source_document_id=source_document_id,
                 )
             )
-        except SkipSourceDocumentError:
+        except SkipSourceDocumentError as exc:
             skipped_urls += 1
+            skipped_reasons.append(f"{source_url}: {exc}")
+            entry_logger.info("skipped by source strategy: %s", exc)
             continue
         except Exception as exc:
             failed_documents += 1
             document_failures.append(f"{source_url}: {exc}")
+            entry_logger.exception("document ingestion failed")
             events.append(
                 AcquisitionEvent(
                     event_type="SourceDocumentIngestionFailed",
@@ -216,6 +216,16 @@ def ingest_source_documents(
             run_status=run_status,
         )
     )
+    run_logger.info(
+        "acquisition completed processed=%s ingested=%s "
+        "skipped=%s failed=%s retry_attempts=%s status=%s",
+        processed_urls,
+        ingested_documents,
+        skipped_urls,
+        failed_documents,
+        retry_attempts,
+        run_status,
+    )
 
     return AcquisitionReport(
         run_id=run_id,
@@ -225,6 +235,7 @@ def ingest_source_documents(
         skipped_urls=skipped_urls,
         retry_attempts=retry_attempts,
         document_failures=tuple(document_failures),
+        skipped_reasons=tuple(skipped_reasons),
         events=tuple(events),
         run_status=run_status,
     )
@@ -232,13 +243,18 @@ def ingest_source_documents(
 
 def get_source_document_versions(
     *,
-    sqlite_path: Path,
+    state_path: Path | None = None,
+    sqlite_path: Path | None = None,
     source_id: str,
     repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
 ) -> list[SourceDocumentVersion]:
     """Load persisted source document versions for one source."""
+    resolved_state_path = state_path or sqlite_path
+    if resolved_state_path is None:
+        raise ValueError("state_path is required")
+
     repository = _build_repository(
-        sqlite_path=sqlite_path,
+        state_path=resolved_state_path,
         repository_backend=repository_backend,
     )
     return repository.list_versions(source_id=source_id)
@@ -289,13 +305,13 @@ def _fetch_with_retries(
 
 def _build_repository(
     *,
-    sqlite_path: Path,
+    state_path: Path,
     repository_backend: Literal["sqlite", "filesystem"],
 ) -> SQLiteSourceDocumentRepository | FilesystemSourceDocumentRepository:
     """Build the configured repository adapter for source versions."""
     if repository_backend == "filesystem":
-        return FilesystemSourceDocumentRepository(sqlite_path)
-    return SQLiteSourceDocumentRepository(sqlite_path)
+        return FilesystemSourceDocumentRepository(state_path)
+    return SQLiteSourceDocumentRepository(state_path)
 
 
 def _utc_now_isoformat() -> str:
@@ -329,31 +345,3 @@ def _build_fetch_with_retries(
         )
 
     return fetch_with_retries
-
-
-def _is_entry_published_on_or_after(
-    *, entry_published_at: str | None, published_since: datetime | None
-) -> bool:
-    """Return true when an entry passes the optional publish-time filter."""
-    if published_since is None:
-        return True
-    if entry_published_at is None:
-        return False
-
-    entry_timestamp = _parse_iso_timestamp(entry_published_at)
-    if entry_timestamp is None:
-        return False
-    return entry_timestamp >= published_since
-
-
-def _parse_iso_timestamp(value: str) -> datetime | None:
-    """Parse one ISO timestamp into UTC, if valid."""
-    normalized = value.strip().replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)

@@ -8,7 +8,8 @@
 | --- | --- | --- | --- |
 | Document Acquisition | The bounded context responsible for discovering, fetching, extracting, normalizing, and storing source documents. | Ingestion Pipeline, Scraper System (as primary term) | No |
 | Source | An external publisher or provider from which documents are acquired. | Website, Feed (when referring to the organization) | No |
-| Australia Institute Source Adapter | The concrete adapter for discovering and retrieving Australia Institute documents from sitemap URLs. | Generic SourceProfile (for v1) | No |
+| Source Adapter | A concrete adapter for discovering and retrieving documents from a particular source. | Generic SourceProfile (for v1) | No |
+| Discovered Document | A as-of-yet unprocessed document that has been discovered but not processed. Contains only a URL and optional published_at date.| Source Document, Canonical Document, Unified Document (v1) | No |
 | Source Document | A source-scoped document record with identity, provenance, normalized text, status, and version history. | Canonical Document, Unified Document (v1) | No |
 | Published At (`published_at`) | Publication timestamp sourced from sitemap `<lastmod>` for the discovered source URL. | Content Publish Date (if not sourced from sitemap) | Yes (some sitemaps may be update times, not true publish times) |
 | Retrieved At (`retrieved_at`) | UTC timestamp when acquisition successfully fetched the document artifact for persistence. | Downloaded At (if ambiguously tied to retries) | No |

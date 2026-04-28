@@ -16,7 +16,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return run_cli(
         args,
         fetch_document=fetch_document_over_http,
-        fetch_text_url=fetch_text_url,
+        fetch=fetch_text_url,
         stdout=sys.stdout,
     )
 

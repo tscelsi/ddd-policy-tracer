@@ -15,7 +15,7 @@ from ddd_policy_tracer import (
     get_source_document_versions,
     ingest_source_documents,
 )
-from ddd_policy_tracer.adapters import DiscoveredSitemapEntry
+from ddd_policy_tracer.adapters import DiscoveredDocument
 
 
 def _build_pdf_with_text(text: str) -> bytes:
@@ -33,11 +33,7 @@ def _build_pdf_with_text(text: str) -> bytes:
     font_ref = writer._add_object(font)
 
     page[NameObject("/Resources")] = DictionaryObject(
-        {
-            NameObject("/Font"): DictionaryObject(
-                {NameObject("/F1"): font_ref}
-            )
-        }
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
     )
 
     stream = DecodedStreamObject()
@@ -688,7 +684,7 @@ def test_lowy_ingests_html_publication_content_and_stores_html_artifact(
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     discovered = [
-        DiscoveredSitemapEntry(
+        DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/sea-security",
             published_at="2025-08-19T00:00:00+00:00",
         )
@@ -744,11 +740,11 @@ def test_lowy_skips_page_with_short_content_or_missing_date(
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     shim_entries = [
-        DiscoveredSitemapEntry(
+        DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/short",
             published_at="2025-08-19T00:00:00+00:00",
         ),
-        DiscoveredSitemapEntry(
+        DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/no-date",
             published_at="2025-08-20T00:00:00+00:00",
         ),
@@ -792,7 +788,7 @@ def test_lowy_drops_acknowledgements_from_normalized_text(
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     entries = [
-        DiscoveredSitemapEntry(
+        DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/with-acks",
             published_at="2025-08-19T00:00:00+00:00",
         )
@@ -838,7 +834,7 @@ def test_lowy_ingests_article_template_with_human_date_text(
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     entries = [
-        DiscoveredSitemapEntry(
+        DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/human-date",
             published_at="2026-01-01T00:00:00+00:00",
         )
@@ -873,7 +869,7 @@ def test_lowy_page_date_overrides_listing_hint_for_published_at(
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     entries = [
-        DiscoveredSitemapEntry(
+        DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/date-override",
             published_at="2024-01-01T00:00:00+00:00",
         )
@@ -915,7 +911,7 @@ def test_lowy_keeps_references_in_normalized_text(
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     entries = [
-        DiscoveredSitemapEntry(
+        DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/references",
             published_at="2025-08-19T00:00:00+00:00",
         )
@@ -951,3 +947,174 @@ def test_lowy_keeps_references_in_normalized_text(
     assert len(versions) == 1
     assert "References" in versions[0].normalized_text
     assert "Useful citation." in versions[0].normalized_text
+
+
+def test_lowy_uses_normalized_page_identity_and_idempotent_html_versioning(
+    tmp_path: Path,
+) -> None:
+    """Persist one normalized Lowy identity without duplicate versions."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    entries = [
+        DiscoveredDocument(
+            source_url=(
+                "https://www.lowyinstitute.org/publications/"
+                "idempotent-check/?utm_source=newsletter"
+            ),
+            published_at="2020-01-01T00:00:00+00:00",
+        )
+    ]
+
+    html_bytes = (
+        b"<html><main><time datetime='2025-08-19T00:00:00+00:00'></time>"
+        b"<h1>Title</h1><p>"
+        + (b"Stable Lowy HTML content. " * 120)
+        + b"</p></main></html>"
+    )
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/idempotent-check/?utm_source=newsletter")
+        return "text/html", html_bytes
+
+    first_report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=entries,
+    )
+    second_report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=entries,
+    )
+
+    assert first_report.ingested_documents == 1
+    assert second_report.ingested_documents == 0
+
+    versions = get_source_document_versions(
+        sqlite_path=sqlite_path,
+        source_id="lowy_institute",
+    )
+    assert len(versions) == 1
+    assert (
+        versions[0].source_document_id
+        == "https://www.lowyinstitute.org/publications/idempotent-check"
+    )
+    assert versions[0].published_at == "2025-08-19T00:00:00+00:00"
+    assert versions[0].content_type == "text/html"
+    assert Path(versions[0].raw_content_ref).read_bytes() == html_bytes
+
+
+def test_lowy_filesystem_backend_persists_html_and_parity_fields(
+    tmp_path: Path,
+) -> None:
+    """Persist Lowy versions via filesystem backend with parity fields."""
+    state_path = tmp_path / "acquisition.jsonl"
+    artifact_dir = tmp_path / "artifacts"
+    entries = [
+        DiscoveredDocument(
+            source_url="https://www.lowyinstitute.org/publications/fs-parity",
+            published_at="2026-01-01T00:00:00+00:00",
+        )
+    ]
+
+    html_bytes = (
+        b"<html><main><time datetime='2026-01-01T00:00:00+00:00'></time>"
+        b"<h1>Filesystem parity</h1><p>"
+        + (b"Long-form filesystem backend content. " * 120)
+        + b"</p></main></html>"
+    )
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        assert url.endswith("/publications/fs-parity")
+        return "text/html", html_bytes
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=state_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        repository_backend="filesystem",
+        discovered_entries=entries,
+    )
+
+    assert report.processed_urls == 1
+    assert report.ingested_documents == 1
+    assert report.failed_documents == 0
+    assert report.run_status == "completed"
+
+    versions = get_source_document_versions(
+        sqlite_path=state_path,
+        source_id="lowy_institute",
+        repository_backend="filesystem",
+    )
+    assert len(versions) == 1
+    version = versions[0]
+    assert version.source_document_id.endswith("/publications/fs-parity")
+    assert version.published_at == "2026-01-01T00:00:00+00:00"
+    assert version.content_type == "text/html"
+    assert Path(version.raw_content_ref).read_bytes() == html_bytes
+
+
+def test_lowy_event_lifecycle_matches_existing_run_semantics(
+    tmp_path: Path,
+) -> None:
+    """Emit expected lifecycle events and run status on mixed outcomes."""
+    sqlite_path = tmp_path / "acquisition.db"
+    artifact_dir = tmp_path / "artifacts"
+    entries = [
+        DiscoveredDocument(
+            source_url="https://www.lowyinstitute.org/publications/event-ok",
+            published_at="2026-01-01T00:00:00+00:00",
+        ),
+        DiscoveredDocument(
+            source_url="https://www.lowyinstitute.org/publications/event-fail",
+            published_at="2026-01-01T00:00:00+00:00",
+        ),
+    ]
+
+    html_bytes = (
+        b"<html><main><time datetime='2026-01-01T00:00:00+00:00'></time>"
+        b"<h1>Event parity</h1><p>"
+        + (b"Eventful Lowy content. " * 120)
+        + b"</p></main></html>"
+    )
+
+    def fetch_document(url: str) -> tuple[str, bytes]:
+        if url.endswith("/event-fail"):
+            raise RuntimeError("fetch exploded")
+        if url.endswith("/event-ok"):
+            return "text/html", html_bytes
+        raise AssertionError(f"unexpected url fetched: {url}")
+
+    report = ingest_source_documents(
+        source_id="lowy_institute",
+        sitemap_xml="",
+        sqlite_path=sqlite_path,
+        artifact_dir=artifact_dir,
+        fetch_document=fetch_document,
+        discovered_entries=entries,
+    )
+
+    assert report.processed_urls == 2
+    assert report.ingested_documents == 1
+    assert report.failed_documents == 1
+    assert report.run_status == "completed_with_failures"
+    assert [event.event_type for event in report.events] == [
+        "AcquisitionRunStarted",
+        "SourceDocumentIngested",
+        "SourceDocumentIngestionFailed",
+        "AcquisitionRunCompleted",
+    ]
+    assert all(event.run_id == report.run_id for event in report.events)
+    assert all(event.source_id == "lowy_institute" for event in report.events)
+    assert report.events[1].source_url is not None
+    assert report.events[2].source_url is not None
+    assert report.events[1].source_url.endswith("/publications/event-ok")
+    assert report.events[2].source_url.endswith("/publications/event-fail")

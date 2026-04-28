@@ -20,8 +20,8 @@ from .domain import SourceDocumentVersion
 
 
 @dataclass(frozen=True)
-class DiscoveredSitemapEntry:
-    """Represent one sitemap URL entry and optional source publication time."""
+class DiscoveredDocument:
+    """Represent one document URL entry and optional source publication time."""
 
     source_url: str
     published_at: str | None
@@ -238,12 +238,12 @@ class DiskArtifactStore:
 
 def discover_sitemap_entries(
     sitemap_xml: str,
-) -> list[DiscoveredSitemapEntry]:
+) -> list[DiscoveredDocument]:
     """Extract URL entries with optional publication timestamps."""
     root = ET.fromstring(sitemap_xml)
     namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
-    entries_by_url: dict[str, DiscoveredSitemapEntry] = {}
+    entries_by_url: dict[str, DiscoveredDocument] = {}
     for node in root.findall("sm:url", namespace):
         loc_node = node.find("sm:loc", namespace)
         if loc_node is None or loc_node.text is None:
@@ -259,7 +259,7 @@ def discover_sitemap_entries(
 
         existing = entries_by_url.get(source_url)
         if existing is None:
-            entries_by_url[source_url] = DiscoveredSitemapEntry(
+            entries_by_url[source_url] = DiscoveredDocument(
                 source_url=source_url,
                 published_at=published_at,
             )
@@ -269,7 +269,7 @@ def discover_sitemap_entries(
             candidate_timestamp=published_at,
             current_timestamp=existing.published_at,
         ):
-            entries_by_url[source_url] = DiscoveredSitemapEntry(
+            entries_by_url[source_url] = DiscoveredDocument(
                 source_url=source_url,
                 published_at=published_at,
             )
@@ -289,9 +289,9 @@ def discover_lowy_listing_entries(
     published_since: datetime | None,
     max_pages: int = 100,
     max_documents: int | None = None,
-) -> tuple[list[DiscoveredSitemapEntry], int]:
+) -> tuple[list[DiscoveredDocument], int]:
     """Discover Lowy publication entries from paginated listing pages."""
-    entries: list[DiscoveredSitemapEntry] = []
+    entries: list[DiscoveredDocument] = []
     pages_scanned = 0
 
     for page in range(max_pages):
@@ -323,10 +323,10 @@ def discover_lowy_listing_entries(
 
 
 def _deduplicate_entries(
-    entries: list[DiscoveredSitemapEntry],
-) -> list[DiscoveredSitemapEntry]:
+    entries: list[DiscoveredDocument],
+) -> list[DiscoveredDocument]:
     """Deduplicate discovered entries while retaining order."""
-    deduped: list[DiscoveredSitemapEntry] = []
+    deduped: list[DiscoveredDocument] = []
     seen_urls: set[str] = set()
     for entry in entries:
         if entry.source_url in seen_urls:
@@ -349,7 +349,9 @@ def _is_timestamp_older_than(*, timestamp: str, cutoff: datetime) -> bool:
     return parsed < normalized_cutoff
 
 
-def _parse_lowy_listing_entries(html_text: str) -> list[DiscoveredSitemapEntry]:
+def _parse_lowy_listing_entries(
+    html_text: str,
+) -> list[DiscoveredDocument]:
     """Parse Lowy listing HTML into publication entries."""
     parser = _LowyListingParser()
     parser.feed(html_text)
@@ -446,7 +448,7 @@ class _LowyListingParser(HTMLParser):
     def __init__(self) -> None:
         """Initialize parser state for one listing page."""
         super().__init__()
-        self.entries: list[DiscoveredSitemapEntry] = []
+        self.entries: list[DiscoveredDocument] = []
         self._article_depth = 0
         self._candidate = _LowyListingCandidate()
         self._capture_time_text = False
@@ -509,7 +511,7 @@ class _LowyListingParser(HTMLParser):
                 and self._candidate.source_url is not None
             ):
                 self.entries.append(
-                    DiscoveredSitemapEntry(
+                    DiscoveredDocument(
                         source_url=self._candidate.source_url,
                         published_at=self._candidate.published_at,
                     )
