@@ -33,7 +33,22 @@ def test_filesystem_claim_repository_round_trips_claim_records(
 ) -> None:
     """Persist claims to JSONL and load matching records back."""
     repository = FilesystemClaimRepository(tmp_path / "claims.jsonl")
-    claims = [_sample_claim(claim_id="claim_1"), _sample_claim(claim_id="claim_2")]
+    claim_1 = _sample_claim(claim_id="claim_1")
+    claim_2 = ClaimCandidate(
+        claim_id="claim_2",
+        chunk_id=claim_1.chunk_id,
+        source_id=claim_1.source_id,
+        source_document_id=claim_1.source_document_id,
+        document_checksum=claim_1.document_checksum,
+        start_char=50,
+        end_char=90,
+        evidence_text=claim_1.evidence_text,
+        normalized_claim_text=claim_1.normalized_claim_text,
+        confidence=claim_1.confidence,
+        claim_type=claim_1.claim_type,
+        extractor_version=claim_1.extractor_version,
+    )
+    claims = [claim_1, claim_2]
 
     inserted = repository.add_claims(claims)
 
