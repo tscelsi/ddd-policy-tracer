@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
+from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
 from .domain import SourceDocumentVersion
@@ -61,7 +62,7 @@ class SQLiteSourceDocumentRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
-                """
+                """,
             )
 
     def get_latest(
@@ -211,7 +212,7 @@ class FilesystemSourceDocumentRepository:
                     content_type=payload["content_type"],
                     created_at=payload["created_at"],
                     updated_at=payload["updated_at"],
-                )
+                ),
             )
         return versions
 
@@ -286,7 +287,6 @@ def discover_lowy_listing_entries(
     *,
     fetch_text_url: Callable[[str, str], str],
     user_agent: str,
-    published_since: datetime | None,
     max_pages: int = 100,
     max_documents: int | None = None,
 ) -> tuple[list[DiscoveredDocument], int]:
@@ -304,19 +304,10 @@ def discover_lowy_listing_entries(
             break
 
         for entry in page_entries:
-            if (
-                published_since is not None
-                and entry.published_at is not None
-                and _is_timestamp_older_than(
-                    timestamp=entry.published_at,
-                    cutoff=published_since,
-                )
-            ):
+            if max_documents is not None and len(entries) >= max_documents:
                 return entries, pages_scanned
 
             entries.append(entry)
-            if max_documents is not None and len(entries) >= max_documents:
-                return entries, pages_scanned
 
     deduped = _deduplicate_entries(entries)
     return deduped, pages_scanned
@@ -353,9 +344,42 @@ def _parse_lowy_listing_entries(
     html_text: str,
 ) -> list[DiscoveredDocument]:
     """Parse Lowy listing HTML into publication entries."""
-    parser = _LowyListingParser()
-    parser.feed(html_text)
-    return parser.entries
+    soup = BeautifulSoup(html_text, "html.parser")
+    entries: list[DiscoveredDocument] = []
+    containers = soup.select(".card__wrapper")
+    if not containers:
+        containers = soup.find_all("a")
+
+    for container in containers:
+        source_url: str | None = None
+        published_at: str | None = None
+
+        preferred_anchor = container.select_one("a.card__title[href]")
+        anchors = []
+        if preferred_anchor is not None:
+            anchors.append(preferred_anchor)
+        anchors.extend(container.find_all("a", href=True))
+
+        for anchor in anchors:
+            absolute_url = urljoin(
+                LOWY_PUBLICATIONS_BASE_URL,
+                str(anchor.get("href")),
+            )
+            if _is_lowy_publication_detail_url(absolute_url):
+                source_url = absolute_url
+                break
+
+        if source_url is None:
+            continue
+
+        entries.append(
+            DiscoveredDocument(
+                source_url=source_url,
+                published_at=published_at,
+            ),
+        )
+
+    return entries
 
 
 def _parse_timestamp(value: str) -> datetime | None:
@@ -372,7 +396,7 @@ def _parse_timestamp(value: str) -> datetime | None:
 
 
 def _is_newer_timestamp(
-    *, candidate_timestamp: str | None, current_timestamp: str | None
+    *, candidate_timestamp: str | None, current_timestamp: str | None,
 ) -> bool:
     """Return true when candidate timestamp is newer than current value."""
     candidate = (
@@ -404,7 +428,7 @@ class _ReportPdfLinkParser(HTMLParser):
         self._active_text_parts: list[str] = []
 
     def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
+        self, tag: str, attrs: list[tuple[str, str | None]],
     ) -> None:
         """Track anchor href values while entering anchor tags."""
         if tag != "a":
@@ -434,91 +458,6 @@ class _ReportPdfLinkParser(HTMLParser):
         self._active_text_parts = []
 
 
-@dataclass
-class _LowyListingCandidate:
-    """Track one listing candidate while parsing an article card."""
-
-    source_url: str | None = None
-    published_at: str | None = None
-
-
-class _LowyListingParser(HTMLParser):
-    """Parse publication links and dates from Lowy listing HTML."""
-
-    def __init__(self) -> None:
-        """Initialize parser state for one listing page."""
-        super().__init__()
-        self.entries: list[DiscoveredDocument] = []
-        self._article_depth = 0
-        self._candidate = _LowyListingCandidate()
-        self._capture_time_text = False
-        self._time_text_parts: list[str] = []
-
-    def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
-    ) -> None:
-        """Capture publication URL/date signals inside article cards."""
-        attr_map = dict(attrs)
-
-        if tag == "article":
-            self._article_depth += 1
-            if self._article_depth == 1:
-                self._candidate = _LowyListingCandidate()
-            return
-
-        if self._article_depth == 0:
-            return
-
-        if tag == "a" and self._candidate.source_url is None:
-            href = attr_map.get("href")
-            if href is None:
-                return
-            absolute_url = urljoin(LOWY_PUBLICATIONS_BASE_URL, href)
-            if _is_lowy_publication_detail_url(absolute_url):
-                self._candidate.source_url = absolute_url
-            return
-
-        if tag == "time":
-            datetime_attr = attr_map.get("datetime")
-            if datetime_attr is not None:
-                parsed = _parse_timestamp(datetime_attr.strip())
-                if parsed is not None:
-                    self._candidate.published_at = parsed.isoformat()
-                    return
-            self._capture_time_text = True
-            self._time_text_parts = []
-
-    def handle_data(self, data: str) -> None:
-        """Accumulate fallback date text inside time tags."""
-        if self._capture_time_text:
-            self._time_text_parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        """Finalize candidates when leaving time/article tags."""
-        if tag == "time" and self._capture_time_text:
-            self._capture_time_text = False
-            if self._candidate.published_at is not None:
-                return
-            raw_text = " ".join(self._time_text_parts).strip()
-            parsed = _parse_lowy_human_date(raw_text)
-            if parsed is not None:
-                self._candidate.published_at = parsed
-            return
-
-        if tag == "article" and self._article_depth > 0:
-            if (
-                self._article_depth == 1
-                and self._candidate.source_url is not None
-            ):
-                self.entries.append(
-                    DiscoveredDocument(
-                        source_url=self._candidate.source_url,
-                        published_at=self._candidate.published_at,
-                    )
-                )
-            self._article_depth -= 1
-
-
 def _parse_lowy_human_date(raw_text: str) -> str | None:
     """Parse Lowy human-readable date text into ISO-8601 UTC."""
     normalized = " ".join(raw_text.split())
@@ -541,7 +480,7 @@ def _is_lowy_publication_detail_url(url: str) -> bool:
 
 
 def extract_pdf_urls_from_report_html(
-    report_url: str, html_bytes: bytes
+    report_url: str, html_bytes: bytes,
 ) -> list[str]:
     """Extract and prioritize absolute PDF links from a report HTML page."""
     parser = _ReportPdfLinkParser()

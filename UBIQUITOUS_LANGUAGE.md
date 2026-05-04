@@ -1,5 +1,31 @@
 # Ubiquitous Language
 
+## Context: Analysis (Supporting)
+
+### Canonical terms
+
+| Term | Definition | Aliases to avoid | Ambiguity flag |
+| --- | --- | --- | --- |
+| Analysis Pipeline | The staged workflow that transforms `SourceDocumentVersion` records into chunks, extraction outputs, enrichment metadata, and graph-ready assertions. | Post-processing, NLP pass (as sole term) | No |
+| Document Chunk | A deterministic, version-bound text segment produced from `normalized_text`. | Paragraph (unless true paragraph boundary) | No |
+| Chunk Identity (`chunk_id`) | Stable identifier for one chunk tied to source and document version offsets. | Section ID | No |
+| Document Checksum Binding (`document_checksum`) | The checksum field copied from acquisition versions to ensure downstream records bind to an exact source document version. | Hash only | No |
+| Claim Candidate | A machine-extracted statement from one chunk that may represent a policy-relevant assertion before canonicalization. | Final Claim | Yes (candidate vs canonical must stay explicit) |
+| Entity Mention | A machine-extracted mention of an organization, person, policy, jurisdiction, or program with chunk-local evidence offsets. | Entity (without mention scope) | Yes |
+| Assessment | A structured stance judgment connecting claim and policy target (`supports`, `contradicts`, etc.) with confidence and evidence links. | Support Edge, Contradiction Edge | No |
+| Evidence Span | The start/end character offsets in chunk text that justify an extraction or stance. | Quote | No |
+| Extraction Lineage | Metadata that identifies extractor implementation/model version and run timestamp for repeatability. | Audit note | No |
+| Hybrid Retrieval | Retrieval approach combining vector similarity over chunks with graph traversal for relationship reasoning. | RAG (as sole term) | Yes |
+
+### Supporting terms
+
+| Term | Definition | Aliases to avoid | Ambiguity flag |
+| --- | --- | --- | --- |
+| Extractor Version | Version tag for deterministic extraction logic or model prompt/config. | Model Version (if rule-based) | Yes |
+| Confidence Score | Numeric signal expressing extraction or stance certainty for ranking and review. | Probability (when not calibrated) | Yes |
+| Insufficient Evidence | Assessment state used when available text cannot justify support/contradict labels. | Neutral (when evidence is missing) | Yes |
+| Canonical Claim | Deduplicated claim representation merged across equivalent claim candidates. | Claim Candidate | Yes |
+
 ## Context: Document Acquisition (Core)
 
 ### Canonical terms

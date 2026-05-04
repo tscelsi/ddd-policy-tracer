@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import abc
-import re
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from urllib.parse import urlparse
+
+import httpx
+from bs4 import BeautifulSoup
 
 from .adapters import (
     DiscoveredDocument,
@@ -30,7 +32,6 @@ class ExtractedSourceDocument:
     artifact_content: bytes
     extracted_text: str
     published_at: str | None
-    retry_attempts: int
 
 
 class SkipSourceDocumentError(Exception):
@@ -57,19 +58,7 @@ class AbstractSourceStrategy(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def extract_document(
-        self,
-        *,
-        source_url: str,
-        user_agent: str,
-        fetch_with_retries: Callable[
-            [str, str, int, Sequence[float], Callable[[float], None]],
-            tuple[str, bytes, int],
-        ],
-        max_retries: int,
-        backoff_seconds: Sequence[float],
-        sleep_fn: Callable[[float], None],
-    ) -> ExtractedSourceDocument:
+    def extract_document(self, *, source_url: str) -> ExtractedSourceDocument:
         """Fetch and extract one document from a source-specific URL."""
         raise NotImplementedError
 
@@ -109,50 +98,39 @@ class AustraliaInstituteSourceStrategy(AbstractSourceStrategy):
             entries = entries[: max(0, limit)]
         return entries, selected_sitemaps
 
-    def extract_document(
-        self,
-        *,
-        source_url: str,
-        user_agent: str,
-        fetch_with_retries: Callable[
-            [str, str, int, Sequence[float], Callable[[float], None]],
-            tuple[str, bytes, int],
-        ],
-        max_retries: int,
-        backoff_seconds: Sequence[float],
-        sleep_fn: Callable[[float], None],
-    ) -> ExtractedSourceDocument:
+    def extract_document(self, *, source_url: str) -> ExtractedSourceDocument:
         """Fetch report page and selected PDF, then extract PDF text."""
-        content_type, raw_content, used_retries = fetch_with_retries(
-            source_url,
-            user_agent,
-            max_retries,
-            backoff_seconds,
-            sleep_fn,
+        # In adapters/http_client.py (or similar)
+
+        res = httpx.get(
+            source_url, headers={"User-Agent": USER_AGENT}, timeout=30,
         )
-        if content_type != "text/html":
-            raise ValueError("report page must be HTML")
+
+        if res.status_code != 200:
+            raise SkipSourceDocumentError(
+                f"Document fetch request failed: {res.status_code}",
+            )
 
         pdf_url = _select_pdf_url_from_report_html(
             report_url=source_url,
-            report_html=raw_content,
+            report_html=res.text.encode("utf-8", errors="ignore"),
         )
-        pdf_content_type, pdf_content, pdf_retries = fetch_with_retries(
-            pdf_url,
-            user_agent,
-            max_retries,
-            backoff_seconds,
-            sleep_fn,
+        res = httpx.get(pdf_url, headers={"User-Agent": USER_AGENT}, timeout=30)
+
+        pdf_content_type = res.headers.get(
+            "Content-Type", "application/octet-stream",
         )
         if pdf_content_type != "application/pdf":
-            raise ValueError("selected report file is not a PDF")
+            raise SkipSourceDocumentError(
+                f"Expected PDF content type but got {pdf_content_type}",
+            )
+        pdf_content = res.content
 
         return ExtractedSourceDocument(
             artifact_content_type=pdf_content_type,
             artifact_content=pdf_content,
             extracted_text=extract_text_from_pdf_bytes(pdf_content),
             published_at=None,
-            retry_attempts=used_retries + pdf_retries,
         )
 
 
@@ -178,67 +156,60 @@ class LowyInstituteSourceStrategy(AbstractSourceStrategy):
         published_since: datetime | None,
         limit: int | None,
     ) -> tuple[list[DiscoveredDocument], int]:
-        """Discover Lowy publication entries from listing pages."""
+        """Discover Lowy publication entries from listing pages.
+
+        NOTE: currently no way to extract published_at field, so Lowy does not
+        support time-based limits.
+        """
+        _ = published_since  # unused in this implementation since no timestamps
         return discover_lowy_listing_entries(
-            fetch=fetch,
+            fetch_text_url=fetch,
             user_agent=USER_AGENT,
-            published_since=published_since,
             max_documents=limit,
         )
 
-    def extract_document(
-        self,
-        *,
-        source_url: str,
-        user_agent: str,
-        fetch_with_retries: Callable[
-            [str, str, int, Sequence[float], Callable[[float], None]],
-            tuple[str, bytes, int],
-        ],
-        max_retries: int,
-        backoff_seconds: Sequence[float],
-        sleep_fn: Callable[[float], None],
-    ) -> ExtractedSourceDocument:
+    def extract_document(self, *, source_url: str) -> ExtractedSourceDocument:
         """Fetch and extract Lowy publication HTML content."""
         if not _is_lowy_publication_detail_url(source_url):
             raise SkipSourceDocumentError(
-                "URL is not a Lowy publication detail page"
+                "URL is not a Lowy publication detail page",
             )
-
-        content_type, raw_content, retry_attempts = fetch_with_retries(
-            source_url,
-            user_agent,
-            max_retries,
-            backoff_seconds,
-            sleep_fn,
+        res = httpx.get(
+            source_url, headers={"User-Agent": USER_AGENT}, timeout=30,
         )
-        if content_type != "text/html":
-            raise SkipSourceDocumentError("Lowy publication page must be HTML")
+        if res.status_code != 200:
+            raise SkipSourceDocumentError(
+                f"Document fetch request failed: {res.status_code}",
+            )
+        content_type = res.headers.get(
+            "Content-Type", "application/octet-stream",
+        )
 
-        html_text = raw_content.decode("utf-8", errors="ignore")
-        page_published_at = _extract_lowy_article_published_at(html_text)
+        if "text/html" not in content_type:
+            raise SkipSourceDocumentError("Lowy publication page must be HTML")
+        soup = BeautifulSoup(res.text, "html.parser")
+        page_published_at = _extract_lowy_article_published_at(soup)
         if page_published_at is None:
             raise SkipSourceDocumentError(
-                "Lowy publication page has no parseable date"
+                "Lowy publication page has no parseable date",
             )
 
-        extracted_text = _extract_lowy_article_text(html_text)
+        extracted_text = _extract_lowy_article_text(res.text)
         if len(_normalize_for_threshold(extracted_text)) < 1500:
             raise SkipSourceDocumentError(
-                "Lowy publication page content below 1500 char threshold"
+                "Lowy publication page content below 1500 char threshold",
             )
 
         return ExtractedSourceDocument(
             artifact_content_type="text/html",
-            artifact_content=raw_content,
+            artifact_content=res.content,
             extracted_text=extracted_text,
             published_at=page_published_at,
-            retry_attempts=retry_attempts,
         )
 
 
 def _select_pdf_url_from_report_html(
-    *, report_url: str, report_html: bytes
+    *, report_url: str, report_html: bytes,
 ) -> str:
     """Choose one PDF URL from a report page or raise when none exist."""
     pdf_urls = extract_pdf_urls_from_report_html(report_url, report_html)
@@ -247,33 +218,26 @@ def _select_pdf_url_from_report_html(
     return pdf_urls[0]
 
 
-def _extract_lowy_article_published_at(html_text: str) -> str | None:
+def _extract_lowy_article_published_at(soup: BeautifulSoup) -> str | None:
     """Extract one parseable publication timestamp from a Lowy page."""
-    time_match = re.search(
-        r"<time[^>]*datetime=[\"']([^\"']+)[\"']",
-        html_text,
-        flags=re.IGNORECASE,
-    )
-    if time_match is not None:
-        parsed = _parse_iso_timestamp(time_match.group(1).strip())
-        if parsed is not None:
-            return parsed.isoformat()
-
-    date_match = re.search(
-        r"\b(\d{1,2}\s+[A-Za-z]+\s+\d{4})\b",
-        html_text,
-    )
-    if date_match is None:
+    page_published_at = soup.find("div", {"class": "article-published-date"})
+    if page_published_at is None:
         return None
+    text = page_published_at.get_text(
+        separator=" ", strip=True,
+    )  # 18 December 2025
 
-    return _parse_human_date(date_match.group(1))
+    return _parse_human_date(text)
 
 
 def _parse_iso_timestamp(value: str) -> datetime | None:
-    """Parse one ISO-8601 timestamp value."""
+    """Parse one ISO-8601 timestamp value, coercing naive results to UTC."""
     normalized = value.replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(normalized)
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed
     except ValueError:
         return None
 
@@ -343,7 +307,7 @@ class _LowyArticleTextParser(HTMLParser):
         self._ignore_depth = 0
 
     def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
+        self, tag: str, attrs: list[tuple[str, str | None]],
     ) -> None:
         """Track content container depth and capture block boundaries."""
         if tag == "main":
@@ -395,7 +359,7 @@ def _is_lowy_publication_detail_url(url: str) -> bool:
 
 
 def _is_entry_published_on_or_after(
-    *, entry_published_at: str | None, published_since: datetime | None
+    *, entry_published_at: str | None, published_since: datetime | None,
 ) -> bool:
     """Return true when an entry passes the optional publish-time filter."""
     if published_since is None:
@@ -473,11 +437,11 @@ def _merge_urlsets(urlset_xml_documents: list[str]) -> str:
                 "  <url>"
                 f"<loc>{url}</loc>"
                 f"<lastmod>{published_at}</lastmod>"
-                "</url>"
+                "</url>",
             )
     lines.extend(
         [
             "</urlset>",
-        ]
+        ],
     )
     return "\n".join(lines)

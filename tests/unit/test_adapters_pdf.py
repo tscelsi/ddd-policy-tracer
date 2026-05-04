@@ -9,7 +9,7 @@ from pypdf.generic import (
     NameObject,
 )
 
-from ddd_policy_tracer.adapters import (
+from ddd_policy_tracer.discovery.adapters import (
     extract_pdf_urls_from_report_html,
     extract_text_from_pdf_bytes,
 )
@@ -25,16 +25,12 @@ def _build_pdf_with_text(text: str) -> bytes:
             NameObject("/Type"): NameObject("/Font"),
             NameObject("/Subtype"): NameObject("/Type1"),
             NameObject("/BaseFont"): NameObject("/Helvetica"),
-        }
+        },
     )
     font_ref = writer._add_object(font)
 
     page[NameObject("/Resources")] = DictionaryObject(
-        {
-            NameObject("/Font"): DictionaryObject(
-                {NameObject("/F1"): font_ref}
-            )
-        }
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})},
     )
 
     stream = DecodedStreamObject()

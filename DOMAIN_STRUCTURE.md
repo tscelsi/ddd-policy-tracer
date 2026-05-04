@@ -17,6 +17,16 @@
   - Persistence adapters: SQLite for metadata/version state, disk storage for raw artifacts.
   - Operator interface: CLI manual trigger.
 
+### Analysis (Planned, now active)
+- Responsibility: Transform `SourceDocumentVersion` records into chunks, extracted claims/entities, enrichment metadata, and graph-ready assertions.
+- Owns language: Document Chunk, Claim Candidate, Entity Mention, Assessment, extraction lineage.
+- Does not own: Source discovery/fetching and raw artifact capture.
+- Integrations:
+  - Upstream from Document Acquisition persisted versions.
+  - Persistence adapters: SQLite/JSONL for chunks and extraction outputs.
+  - Operator interface: CLI chunk/extract commands.
+  - Downstream: knowledge graph materialization and analyst query services.
+
 ## Context map (draft)
 
 - External Source Web (Australia Institute) -> Document Acquisition: sitemap and document retrieval over HTTP (anti-corruption via source adapter + URL/content filters).
@@ -24,6 +34,10 @@
 - Document Acquisition -> Disk Artifact Adapter: raw artifact storage port implementation.
 - Operator CLI -> Document Acquisition: command-based manual run initiation.
 - Document Acquisition -> Future Analysis Context: downstream consumption of normalized source document records/events (planned, not in v1 scope).
+- Document Acquisition -> Analysis: consume persisted source document versions as analysis input.
+- Analysis -> Chunk Persistence Adapter: persist `DocumentChunk` records for each document version.
+- Analysis -> Extraction Persistence Adapter: persist `ClaimCandidate` and `EntityMention` records.
+- Analysis -> Future Graph Context: emit graph-ready assertions and provenance metadata.
 
 ## Aggregate candidates
 

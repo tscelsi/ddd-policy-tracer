@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Acquire Lowy",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "acquire",
+        "--source",
+        "lowy_institute",
+        "--state-path",
+        "data/acquisition.jsonl",
+        "--repository-backend",
+        "filesystem",
+        "--artifact-dir",
+        "data/artifacts",
+        "--limit",
+        "5",
+        "--log-level",
+        "info"
+      ]
+    }
+  ]
+}

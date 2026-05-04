@@ -1,6 +1,6 @@
 """Unit tests for sitemap discovery adapter behavior."""
 
-from ddd_policy_tracer.adapters import discover_sitemap_entries
+from ddd_policy_tracer.discovery.adapters import discover_sitemap_entries
 
 
 def test_discover_sitemap_entries_reads_loc_and_lastmod() -> None:
@@ -45,8 +45,9 @@ def test_discover_sitemap_entries_allows_missing_or_invalid_lastmod() -> None:
     assert all(entry.published_at is None for entry in entries)
 
 
-def test_discover_sitemap_entries_deduplicates_and_keeps_latest_lastmod(
-) -> None:
+def test_discover_sitemap_entries_deduplicates_and_keeps_latest_lastmod() -> (
+    None
+):
     """Keep one entry per URL and retain the newest published_at value."""
     sitemap_xml = """
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

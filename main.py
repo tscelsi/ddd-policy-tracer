@@ -15,21 +15,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     return run_cli(
         args,
-        fetch_document=fetch_document_over_http,
         fetch=fetch_text_url,
         stdout=sys.stdout,
     )
-
-
-def fetch_document_over_http(url: str, user_agent: str) -> tuple[str, bytes]:
-    """Fetch one document over HTTP with a configured user-agent header."""
-    request = Request(url, headers={"User-Agent": user_agent})
-    with urlopen(request, timeout=30) as response:
-        content_type = (
-            response.headers.get_content_type() or "application/octet-stream"
-        )
-        payload = response.read()
-    return content_type, payload
 
 
 def fetch_text_url(url: str, user_agent: str) -> str:

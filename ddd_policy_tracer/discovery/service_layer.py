@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import inspect
-import time
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
+from ddd_policy_tracer.utils.time_helpers import utc_now_isoformat
+
+from ..utils.logger import get_logger
 from .adapters import (
     DiscoveredDocument,
     DiskArtifactStore,
@@ -24,7 +23,6 @@ from .domain import (
     normalize_text,
 )
 from .source_strategies import SkipSourceDocumentError, get_source_strategy
-from .utils.logger import get_logger
 
 LOGGER = get_logger(__name__, ctx="service_layer")
 
@@ -69,15 +67,13 @@ def ingest_source_documents(
     source_id: str,
     artifact_dir: Path,
     discovered_documents: list[DiscoveredDocument],
-    fetch_document: Callable[..., tuple[str, bytes]],
     state_path: Path | None = None,
-    user_agent: str = "ddd-policy-tracer/0.1",
     repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
-    max_retries: int = 2,
-    backoff_seconds: Sequence[float] = (0.25, 0.5),
-    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> AcquisitionReport:
     """Ingest discovered URLs and return aggregate acquisition outcomes."""
+    if state_path is None:
+        raise ValueError("state_path is required")
+
     repository = _build_repository(
         state_path=state_path,
         repository_backend=repository_backend,
@@ -99,7 +95,7 @@ def ingest_source_documents(
             event_type="AcquisitionRunStarted",
             run_id=run_id,
             source_id=source_id,
-        )
+        ),
     ]
     run_logger.info(
         "acquisition run started backend=%s doc_count=%s",
@@ -117,20 +113,9 @@ def ingest_source_documents(
         entry_logger = entry_logger.bind(source_document_id=source_document_id)
 
         try:
-            fetch_with_retries = _build_fetch_with_retries(
-                fetch_document=fetch_document
-            )
-            extracted = source_strategy.extract_document(
-                source_url=source_url,
-                user_agent=user_agent,
-                fetch_with_retries=fetch_with_retries,
-                max_retries=max_retries,
-                backoff_seconds=backoff_seconds,
-                sleep_fn=sleep_fn,
-            )
-            retry_attempts += extracted.retry_attempts
+            extracted = source_strategy.extract_document(source_url=source_url)
 
-            now = _utc_now_isoformat()
+            now = utc_now_isoformat()
             normalized = normalize_text(extracted.extracted_text)
             if not normalized:
                 raise ValueError("normalized_text is empty")
@@ -167,9 +152,8 @@ def ingest_source_documents(
             repository.add_version(version)
             ingested_documents += 1
             entry_logger.info(
-                "ingested version content_type=%s retries=%s",
+                "ingested version content_type=%s",
                 extracted.artifact_content_type,
-                extracted.retry_attempts,
             )
             events.append(
                 AcquisitionEvent(
@@ -178,7 +162,7 @@ def ingest_source_documents(
                     source_id=source_id,
                     source_url=source_url,
                     source_document_id=source_document_id,
-                )
+                ),
             )
         except SkipSourceDocumentError as exc:
             skipped_urls += 1
@@ -196,12 +180,12 @@ def ingest_source_documents(
                     source_id=source_id,
                     source_url=source_url,
                     source_document_id=source_document_id,
-                )
+                ),
             )
 
     if failed_documents == 0:
         run_status: Literal[
-            "completed", "completed_with_failures", "failed"
+            "completed", "completed_with_failures", "failed",
         ] = "completed"
     elif ingested_documents == 0:
         run_status = "failed"
@@ -214,7 +198,7 @@ def ingest_source_documents(
             run_id=run_id,
             source_id=source_id,
             run_status=run_status,
-        )
+        ),
     )
     run_logger.info(
         "acquisition completed processed=%s ingested=%s "
@@ -260,49 +244,6 @@ def get_source_document_versions(
     return repository.list_versions(source_id=source_id)
 
 
-def _call_fetch_document(
-    *,
-    fetch_document: Callable[..., tuple[str, bytes]],
-    source_url: str,
-    user_agent: str,
-) -> tuple[str, bytes]:
-    """Call the fetcher using supported URL-only or URL+agent signatures."""
-    signature = inspect.signature(fetch_document)
-    if len(signature.parameters) >= 2:
-        return fetch_document(source_url, user_agent)
-    return fetch_document(source_url)
-
-
-def _fetch_with_retries(
-    *,
-    fetch_document: Callable[..., tuple[str, bytes]],
-    source_url: str,
-    user_agent: str,
-    max_retries: int,
-    backoff_seconds: Sequence[float],
-    sleep_fn: Callable[[float], None],
-) -> tuple[str, bytes, int]:
-    """Fetch one source URL with bounded retries for transient failures."""
-    retries_used = 0
-
-    while True:
-        try:
-            content_type, raw_content = _call_fetch_document(
-                fetch_document=fetch_document,
-                source_url=source_url,
-                user_agent=user_agent,
-            )
-            return content_type, raw_content, retries_used
-        except (TimeoutError, ConnectionError):
-            if retries_used >= max_retries:
-                raise
-
-            delay_index = min(retries_used, max(0, len(backoff_seconds) - 1))
-            delay = backoff_seconds[delay_index] if backoff_seconds else 0.0
-            sleep_fn(delay)
-            retries_used += 1
-
-
 def _build_repository(
     *,
     state_path: Path,
@@ -312,36 +253,3 @@ def _build_repository(
     if repository_backend == "filesystem":
         return FilesystemSourceDocumentRepository(state_path)
     return SQLiteSourceDocumentRepository(state_path)
-
-
-def _utc_now_isoformat() -> str:
-    """Return the current UTC timestamp in ISO-8601 format."""
-    return datetime.now(UTC).isoformat()
-
-
-def _build_fetch_with_retries(
-    *, fetch_document: Callable[..., tuple[str, bytes]]
-) -> Callable[
-    [str, str, int, Sequence[float], Callable[[float], None]],
-    tuple[str, bytes, int],
-]:
-    """Build a source-strategy-compatible fetch wrapper with retries."""
-
-    def fetch_with_retries(
-        source_url: str,
-        user_agent: str,
-        max_retries: int,
-        backoff_seconds: Sequence[float],
-        sleep_fn: Callable[[float], None],
-    ) -> tuple[str, bytes, int]:
-        """Fetch one URL with retry controls provided by the caller."""
-        return _fetch_with_retries(
-            fetch_document=fetch_document,
-            source_url=source_url,
-            user_agent=user_agent,
-            max_retries=max_retries,
-            backoff_seconds=backoff_seconds,
-            sleep_fn=sleep_fn,
-        )
-
-    return fetch_with_retries

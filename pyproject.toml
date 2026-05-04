@@ -5,6 +5,8 @@ description = "DDD-first policy document acquisition prototype"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "bs4>=0.0.2",
+    "httpx>=0.28.1",
     "pypdf>=6.10.2",
 ]
 
@@ -12,15 +14,17 @@ dependencies = [
 dev = [
     "mypy>=1.18.2",
     "pytest>=8.4.2",
+    "pytest-httpx>=0.36.2",
     "ruff>=0.14.1",
 ]
 
 [tool.ruff]
-line-length = 80
+line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "D", "UP", "B"]
+select = ["E", "F", "W", "I", "N", "D", "UP", "B", "ASYNC", "ANN", "COM", "PT", "RUF", "S", "T", "YTT"]
+ignore = ["S101"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

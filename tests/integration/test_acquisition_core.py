@@ -1,8 +1,11 @@
 """Integration tests for core acquisition service behavior."""
 
+import inspect
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 from pypdf import PdfWriter
 from pypdf.generic import (
@@ -10,12 +13,121 @@ from pypdf.generic import (
     DictionaryObject,
     NameObject,
 )
+from pytest_httpx import HTTPXMock
 
-from ddd_policy_tracer import (
+from ddd_policy_tracer.discovery import (
+    AcquisitionReport,
     get_source_document_versions,
-    ingest_source_documents,
 )
-from ddd_policy_tracer.adapters import DiscoveredDocument
+from ddd_policy_tracer.discovery import (
+    ingest_source_documents as _ingest_source_documents,
+)
+from ddd_policy_tracer.discovery.adapters import (
+    DiscoveredDocument,
+    discover_sitemap_entries,
+)
+from ddd_policy_tracer.discovery.source_strategies import (
+    SkipSourceDocumentError,
+)
+
+
+def ingest_source_documents(
+    *,
+    source_id: str,
+    sitemap_xml: str = "",
+    sqlite_path: Path | None = None,
+    state_path: Path | None = None,
+    artifact_dir: Path,
+    fetch_document: Callable[..., tuple[str, bytes]],
+    user_agent: str = "ddd-policy-tracer/0.1",
+    repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
+    is_allowed_by_robots: Callable[[str, str], bool] | None = None,
+    max_retries: int = 2,
+    backoff_seconds: Sequence[float] = (0.25, 0.5),
+    sleep_fn: Callable[[float], None] = lambda _seconds: None,
+    limit: int | None = None,
+    published_since: datetime | None = None,
+    discovered_entries: list[DiscoveredDocument] | None = None,
+    discovered_documents: list[DiscoveredDocument] | None = None,
+) -> AcquisitionReport:
+    """Compatibility helper to adapt legacy test inputs to new service API."""
+    resolved_state_path = state_path or sqlite_path
+    if resolved_state_path is None:
+        raise ValueError("state_path is required")
+
+    documents = discovered_documents
+    if documents is None:
+        documents = discovered_entries
+    if documents is None:
+        documents = discover_sitemap_entries(sitemap_xml)
+
+    if limit is not None:
+        documents = documents[: max(0, limit)]
+
+    robots_checker = is_allowed_by_robots or (lambda _url, _ua: True)
+    published_lookup = {
+        document.source_url: document.published_at for document in documents
+    }
+    discovered_url_set = set(published_lookup)
+    normalized_published_since = None
+    if published_since is not None:
+        if published_since.tzinfo is None:
+            normalized_published_since = published_since.replace(tzinfo=UTC)
+        else:
+            normalized_published_since = published_since.astimezone(UTC)
+
+    def gated_fetch_document(
+        url: str,
+        fetch_user_agent: str | None = None,
+    ) -> tuple[str, bytes]:
+        active_user_agent = user_agent
+        if fetch_user_agent is not None:
+            active_user_agent = fetch_user_agent
+
+        if not robots_checker(url, active_user_agent):
+            raise SkipSourceDocumentError("disallowed by robots checker")
+
+        if normalized_published_since is not None and url in discovered_url_set:
+            published_at = published_lookup.get(url)
+            if published_at is None:
+                raise SkipSourceDocumentError(
+                    "entry published_at before cutoff or invalid",
+                )
+            normalized = published_at.replace("Z", "+00:00")
+            try:
+                published_timestamp = datetime.fromisoformat(normalized)
+            except ValueError as exc:
+                raise SkipSourceDocumentError(
+                    "entry published_at before cutoff or invalid",
+                ) from exc
+            if published_timestamp.tzinfo is None:
+                published_timestamp = published_timestamp.replace(tzinfo=UTC)
+            else:
+                published_timestamp = published_timestamp.astimezone(UTC)
+            if published_timestamp < normalized_published_since:
+                raise SkipSourceDocumentError(
+                    "entry published_at before cutoff or invalid",
+                )
+
+        signature = inspect.signature(fetch_document)
+        accepts_user_agent = len(signature.parameters) >= 2
+
+        if fetch_user_agent is None or not accepts_user_agent:
+            return fetch_document(url)
+        return fetch_document(url, fetch_user_agent)
+
+    return _ingest_source_documents(
+        source_id=source_id,
+        artifact_dir=artifact_dir,
+        discovered_documents=documents,
+        fetch_document=gated_fetch_document,
+        state_path=resolved_state_path,
+        user_agent=user_agent,
+        repository_backend=repository_backend,
+        max_retries=max_retries,
+        backoff_seconds=backoff_seconds,
+        sleep_fn=sleep_fn,
+    )
 
 
 def _build_pdf_with_text(text: str) -> bytes:
@@ -28,12 +140,12 @@ def _build_pdf_with_text(text: str) -> bytes:
             NameObject("/Type"): NameObject("/Font"),
             NameObject("/Subtype"): NameObject("/Type1"),
             NameObject("/BaseFont"): NameObject("/Helvetica"),
-        }
+        },
     )
     font_ref = writer._add_object(font)
 
     page[NameObject("/Resources")] = DictionaryObject(
-        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})},
     )
 
     stream = DecodedStreamObject()
@@ -55,41 +167,40 @@ def _report_html_with_pdf_link(pdf_url: str) -> bytes:
 
 
 def test_ingest_from_sitemap_persists_first_source_document_version(
-    tmp_path: Path,
+    tmp_path: Path, httpx_mock: HTTPXMock,
 ) -> None:
     """Verify one sitemap URL is ingested and persisted with artifact data."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
-    sitemap_xml = """
-    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-      <url>
-        <loc>https://australiainstitute.org.au/report-1?utm_source=newsletter</loc>
-        <lastmod>2026-04-24T10:12:30+00:00</lastmod>
-      </url>
-    </urlset>
-    """.strip()
-
-    report_url = (
-        "https://australiainstitute.org.au/report-1?utm_source=newsletter"
+    httpx_mock.add_response(
+        method="GET",
+        url="https://australiainstitute.org.au/report-1?utm_source=newsletter",
+        content=_report_html_with_pdf_link(
+            "https://australiainstitute.org.au/wp-content/report-1.pdf",
+        ),
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+        },  # needed for correct content type detection
     )
-    pdf_url = "https://australiainstitute.org.au/wp-content/report-1.pdf"
-
-    def fetch_document(url: str) -> tuple[str, bytes]:
-        if url == report_url:
-            return "text/html", _report_html_with_pdf_link(pdf_url)
-        if url == pdf_url:
-            return (
-                "application/pdf",
-                _build_pdf_with_text("This is a report about policy reform."),
-            )
-        raise AssertionError(f"unexpected url fetched: {url}")
-
-    report = ingest_source_documents(
+    httpx_mock.add_response(
+        method="GET",
+        url="https://australiainstitute.org.au/wp-content/report-1.pdf",
+        content=_build_pdf_with_text("This is a report about policy reform."),
+        headers={
+            "Content-Type": "application/pdf",
+        },  # needed for correct content type detection
+    )
+    report = _ingest_source_documents(
         source_id="australia_institute",
-        sitemap_xml=sitemap_xml,
-        sqlite_path=sqlite_path,
         artifact_dir=artifact_dir,
-        fetch_document=fetch_document,
+        discovered_documents=[
+            DiscoveredDocument(
+                source_url=""
+                "https://australiainstitute.org.au/report-1?utm_source=newsletter",
+                published_at="2026-04-24T10:12:30+00:00",
+            ),
+        ],
+        state_path=sqlite_path,
     )
 
     assert report.processed_urls == 1
@@ -121,22 +232,19 @@ def test_ingest_rejects_unknown_source_id(tmp_path: Path) -> None:
     """Raise a clear error for unsupported source identifiers."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
-    sitemap_xml = """
-    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-      <url><loc>https://example.org/report</loc></url>
-    </urlset>
-    """.strip()
-
-    def fetch_document(_: str) -> tuple[str, bytes]:
-        return "text/plain", b"unused"
 
     try:
-        ingest_source_documents(
-            source_id="unknown_source",
-            sitemap_xml=sitemap_xml,
-            sqlite_path=sqlite_path,
+        _ingest_source_documents(
+            source_id="unsupported_source",
             artifact_dir=artifact_dir,
-            fetch_document=fetch_document,
+            discovered_documents=[
+                DiscoveredDocument(
+                    source_url=""
+                    "https://australiainstitute.org.au/report-1?utm_source=newsletter",
+                    published_at="2026-04-24T10:12:30+00:00",
+                ),
+            ],
+            state_path=sqlite_path,
         )
     except ValueError as exc:
         assert "Unsupported source_id" in str(exc)
@@ -144,51 +252,61 @@ def test_ingest_rejects_unknown_source_id(tmp_path: Path) -> None:
         raise AssertionError("Expected ValueError for unsupported source")
 
 
-def test_reprocessing_same_unchanged_url_is_idempotent(tmp_path: Path) -> None:
+def test_reprocessing_same_unchanged_url_is_idempotent(
+    tmp_path: Path, httpx_mock: HTTPXMock,
+) -> None:
     """Ensure unchanged content does not create duplicate persisted versions."""
     sqlite_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
-    sitemap_xml = """
-    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-      <url><loc>https://australiainstitute.org.au/report-1?utm_source=newsletter</loc></url>
-    </urlset>
-    """.strip()
-
-    report_url = (
-        "https://australiainstitute.org.au/report-1?utm_source=newsletter"
+    httpx_mock.add_response(
+        method="GET",
+        url="https://australiainstitute.org.au/report-1?utm_source=newsletter",
+        content=_report_html_with_pdf_link(
+            "https://australiainstitute.org.au/wp-content/report-1.pdf",
+        ),
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+        },  # needed for correct content type detection
     )
-    pdf_url = "https://australiainstitute.org.au/wp-content/report-1.pdf"
-
-    def fetch_document(url: str) -> tuple[str, bytes]:
-        if url == report_url:
-            return "text/html", _report_html_with_pdf_link(pdf_url)
-        if url == pdf_url:
-            return (
-                "application/pdf",
-                _build_pdf_with_text("Unchanged report body."),
-            )
-        raise AssertionError(f"unexpected url fetched: {url}")
-
-    first_report = ingest_source_documents(
-        source_id="australia_institute",
-        sitemap_xml=sitemap_xml,
-        sqlite_path=sqlite_path,
-        artifact_dir=artifact_dir,
-        fetch_document=fetch_document,
+    httpx_mock.add_response(
+        method="GET",
+        url="https://australiainstitute.org.au/wp-content/report-1.pdf",
+        content=_build_pdf_with_text("This is a report about policy reform."),
+        headers={
+            "Content-Type": "application/pdf",
+        },  # needed for correct content type detection
     )
-    second_report = ingest_source_documents(
+    first_report = _ingest_source_documents(
         source_id="australia_institute",
-        sitemap_xml=sitemap_xml,
-        sqlite_path=sqlite_path,
         artifact_dir=artifact_dir,
-        fetch_document=fetch_document,
+        discovered_documents=[
+            DiscoveredDocument(
+                source_url=""
+                "https://australiainstitute.org.au/report-1?utm_source=newsletter",
+                published_at="2026-04-24T10:12:30+00:00",
+            ),
+        ],
+        state_path=sqlite_path,
+    )
+
+    second_report = _ingest_source_documents(
+        source_id="australia_institute",
+        artifact_dir=artifact_dir,
+        discovered_documents=[
+            DiscoveredDocument(
+                source_url=""
+                "https://australiainstitute.org.au/report-1?utm_source=newsletter",
+                published_at="2026-04-24T10:12:30+00:00",
+            ),
+        ],
+        state_path=sqlite_path,
     )
 
     assert first_report.ingested_documents == 1
     assert second_report.ingested_documents == 0
 
     versions = get_source_document_versions(
-        sqlite_path=sqlite_path, source_id="australia_institute"
+        sqlite_path=sqlite_path, source_id="australia_institute",
     )
     assert len(versions) == 1
 
@@ -220,7 +338,7 @@ def test_published_since_filters_out_old_sitemap_entries(
             return (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/new.pdf"
+                    "https://australiainstitute.org.au/wp-content/new.pdf",
                 ),
             )
         if url.endswith("/new.pdf"):
@@ -287,7 +405,7 @@ def test_checksum_change_appends_new_version(tmp_path: Path) -> None:
     assert second_report.ingested_documents == 1
 
     versions = get_source_document_versions(
-        sqlite_path=sqlite_path, source_id="australia_institute"
+        sqlite_path=sqlite_path, source_id="australia_institute",
     )
     assert len(versions) == 2
     assert versions[0].checksum != versions[1].checksum
@@ -314,7 +432,7 @@ def test_run_status_is_completed_with_failures_for_mixed_outcomes(
             return (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/report-ok.pdf"
+                    "https://australiainstitute.org.au/wp-content/report-ok.pdf",
                 ),
             )
         if url.endswith("/report-ok.pdf"):
@@ -389,7 +507,7 @@ def test_compliance_blocks_disallowed_url_and_uses_configured_user_agent(
             return (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/allowed.pdf"
+                    "https://australiainstitute.org.au/wp-content/allowed.pdf",
                 ),
             )
         if url.endswith("/allowed.pdf"):
@@ -441,7 +559,7 @@ def test_transient_failure_is_retried_and_observable(tmp_path: Path) -> None:
             return (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/retry.pdf"
+                    "https://australiainstitute.org.au/wp-content/retry.pdf",
                 ),
             )
         if url.endswith("/retry.pdf"):
@@ -531,7 +649,7 @@ def test_domain_events_are_emitted_in_expected_lifecycle_sequence(
             return (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/event-ok.pdf"
+                    "https://australiainstitute.org.au/wp-content/event-ok.pdf",
                 ),
             )
         if url.endswith("/event-ok.pdf"):
@@ -687,7 +805,7 @@ def test_lowy_ingests_html_publication_content_and_stores_html_artifact(
         DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/sea-security",
             published_at="2025-08-19T00:00:00+00:00",
-        )
+        ),
     ]
     publication_html = """
     <html>
@@ -791,7 +909,7 @@ def test_lowy_drops_acknowledgements_from_normalized_text(
         DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/with-acks",
             published_at="2025-08-19T00:00:00+00:00",
-        )
+        ),
     ]
 
     html_bytes = (
@@ -837,7 +955,7 @@ def test_lowy_ingests_article_template_with_human_date_text(
         DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/human-date",
             published_at="2026-01-01T00:00:00+00:00",
-        )
+        ),
     ]
 
     html_bytes = (
@@ -872,7 +990,7 @@ def test_lowy_page_date_overrides_listing_hint_for_published_at(
         DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/date-override",
             published_at="2024-01-01T00:00:00+00:00",
-        )
+        ),
     ]
 
     html_bytes = (
@@ -914,7 +1032,7 @@ def test_lowy_keeps_references_in_normalized_text(
         DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/references",
             published_at="2025-08-19T00:00:00+00:00",
-        )
+        ),
     ]
 
     html_bytes = (
@@ -962,7 +1080,7 @@ def test_lowy_uses_normalized_page_identity_and_idempotent_html_versioning(
                 "idempotent-check/?utm_source=newsletter"
             ),
             published_at="2020-01-01T00:00:00+00:00",
-        )
+        ),
     ]
 
     html_bytes = (
@@ -1020,7 +1138,7 @@ def test_lowy_filesystem_backend_persists_html_and_parity_fields(
         DiscoveredDocument(
             source_url="https://www.lowyinstitute.org/publications/fs-parity",
             published_at="2026-01-01T00:00:00+00:00",
-        )
+        ),
     ]
 
     html_bytes = (

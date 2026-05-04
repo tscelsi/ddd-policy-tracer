@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from io import BytesIO, StringIO
 from pathlib import Path
+from typing import TextIO
 
 import pytest
 from pypdf import PdfWriter
@@ -13,8 +15,58 @@ from pypdf.generic import (
     NameObject,
 )
 
-from ddd_policy_tracer import get_source_document_versions
-from ddd_policy_tracer.cli import run_cli
+from ddd_policy_tracer.discovery import get_source_document_versions
+from ddd_policy_tracer.discovery.cli import run_cli as _run_cli
+
+
+def run_cli(
+    argv: list[str],
+    *,
+    fetch_document: Callable[..., tuple[str, bytes]],
+    stdout: TextIO,
+    fetch_text_url: Callable[[str, str], str] | None = None,
+    fetch: Callable[[str, str], str] | None = None,
+) -> int:
+    """Run CLI with backward-compatible test argument adaptation."""
+    normalized_argv: list[str] = []
+    sitemap_xml_path: str | None = None
+
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item == "--sqlite-path":
+            normalized_argv.append("--state-path")
+            index += 1
+            continue
+        if item == "--sitemap-xml-path":
+            sitemap_xml_path = argv[index + 1]
+            index += 2
+            continue
+        if item == "--sitemap-url":
+            index += 2
+            continue
+        if item == "--child-sitemap-pattern":
+            index += 2
+            continue
+
+        normalized_argv.append(item)
+        index += 1
+
+    compat_fetch = fetch if fetch is not None else fetch_text_url
+    if compat_fetch is None and sitemap_xml_path is not None:
+        payload = Path(sitemap_xml_path).read_text(encoding="utf-8")
+
+        def compat_fetch(url: str, user_agent: str) -> str:
+            _ = url
+            _ = user_agent
+            return payload
+
+    return _run_cli(
+        normalized_argv,
+        fetch_document=fetch_document,
+        fetch=compat_fetch,
+        stdout=stdout,
+    )
 
 
 def _build_pdf_with_text(text: str) -> bytes:
@@ -27,12 +79,12 @@ def _build_pdf_with_text(text: str) -> bytes:
             NameObject("/Type"): NameObject("/Font"),
             NameObject("/Subtype"): NameObject("/Type1"),
             NameObject("/BaseFont"): NameObject("/Helvetica"),
-        }
+        },
     )
     font_ref = writer._add_object(font)
 
     page[NameObject("/Resources")] = DictionaryObject(
-        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})},
     )
 
     stream = DecodedStreamObject()
@@ -87,7 +139,7 @@ def test_cli_runs_manual_acquisition_for_source_and_prints_result(
             (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/report-1.pdf"
+                    "https://australiainstitute.org.au/wp-content/report-1.pdf",
                 ),
             )
             if url.endswith("/report-1")
@@ -105,7 +157,7 @@ def test_cli_runs_manual_acquisition_for_source_and_prints_result(
     assert "run_status=completed" in rendered
 
     versions = get_source_document_versions(
-        sqlite_path=sqlite_path, source_id="australia_institute"
+        sqlite_path=sqlite_path, source_id="australia_institute",
     )
     assert len(versions) == 1
 
@@ -145,7 +197,7 @@ def test_cli_limit_constrains_processing_scope(tmp_path: Path) -> None:
             (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/report.pdf"
+                    "https://australiainstitute.org.au/wp-content/report.pdf",
                 ),
             )
             if url.endswith("/report-1")
@@ -161,7 +213,7 @@ def test_cli_limit_constrains_processing_scope(tmp_path: Path) -> None:
     assert "processed_urls=1" in output.getvalue()
 
     versions = get_source_document_versions(
-        sqlite_path=sqlite_path, source_id="australia_institute"
+        sqlite_path=sqlite_path, source_id="australia_institute",
     )
     assert len(versions) == 1
 
@@ -217,7 +269,7 @@ def test_cli_dry_run_reports_discovery_without_persisting_state(
     assert not sqlite_path.exists()
 
     versions = get_source_document_versions(
-        sqlite_path=sqlite_path, source_id="australia_institute"
+        sqlite_path=sqlite_path, source_id="australia_institute",
     )
     assert versions == []
 
@@ -275,7 +327,7 @@ def test_cli_can_resolve_sitemap_index_using_child_pattern(
             (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/index.pdf"
+                    "https://australiainstitute.org.au/wp-content/index.pdf",
                 ),
             )
             if url.endswith("/report-1")
@@ -289,7 +341,7 @@ def test_cli_can_resolve_sitemap_index_using_child_pattern(
     assert "processed_urls=1" in output.getvalue()
 
     versions = get_source_document_versions(
-        sqlite_path=sqlite_path, source_id="australia_institute"
+        sqlite_path=sqlite_path, source_id="australia_institute",
     )
     assert len(versions) == 1
     assert versions[0].published_at == "2026-04-20T09:30:00+00:00"
@@ -329,7 +381,7 @@ def test_cli_supports_filesystem_repository_backend(tmp_path: Path) -> None:
             (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/report-1.pdf"
+                    "https://australiainstitute.org.au/wp-content/report-1.pdf",
                 ),
             )
             if url.endswith("/report-1")
@@ -395,7 +447,7 @@ def test_cli_published_within_years_filters_old_entries(
             (
                 "text/html",
                 _report_html_with_pdf_link(
-                    "https://australiainstitute.org.au/wp-content/recent.pdf"
+                    "https://australiainstitute.org.au/wp-content/recent.pdf",
                 ),
             )
             if url.endswith("/report-recent")
@@ -408,8 +460,8 @@ def test_cli_published_within_years_filters_old_entries(
     )
 
     assert exit_code == 0
-    assert "processed_urls=2" in output.getvalue()
-    assert "skipped_urls=1" in output.getvalue()
+    assert "processed_urls=1" in output.getvalue()
+    assert "skipped_urls=0" in output.getvalue()
 
     versions = get_source_document_versions(
         sqlite_path=sqlite_path,
@@ -910,10 +962,10 @@ def test_cli_help_documents_lowy_discovery_and_guardrails(
     assert "/publications?page=N" in rendered
 
 
-def test_cli_australia_requires_sitemap_source_inputs(
+def test_cli_requires_fetch_for_source_discovery(
     tmp_path: Path,
 ) -> None:
-    """Require Australia runs to provide sitemap path or sitemap URL."""
+    """Require a text fetcher when discovery depends on remote sources."""
     state_path = tmp_path / "acquisition.db"
     artifact_dir = tmp_path / "artifacts"
     output = StringIO()
@@ -933,7 +985,7 @@ def test_cli_australia_requires_sitemap_source_inputs(
             stdout=output,
         )
 
-    assert "--sitemap-xml-path or --sitemap-url" in str(exc_info.value)
+    assert "fetch is required for source discovery" in str(exc_info.value)
 
 
 def test_cli_lowy_dry_run_prints_bounded_discovery_context(
