@@ -11,7 +11,6 @@ from ddd_policy_tracer.analysis.chunking_models import DocumentChunk
 from .models import ClaimCandidate
 from .ports import ClaimExtractor
 
-_SENTENCE_END_RE = re.compile(r"[.!?]+")
 _QUANTITATIVE_RE = re.compile(
     r"("  # start capture for readability
     r"\b\d+(?:[.,]\d+)?%\b"
@@ -21,6 +20,12 @@ _QUANTITATIVE_RE = re.compile(
     r")",
     flags=re.IGNORECASE,
 )
+_SKIP_HEADING_RE = re.compile(
+    r"^(table|figure|fig\.?|appendix|chapter|section)\s+"
+    r"[A-Za-z0-9\-]+(?:\s+[A-Za-z0-9\-]+)*(?:[:.-]+)?$",
+    flags=re.IGNORECASE,
+)
+_SKIP_LABEL_RE = re.compile(r"^[A-Za-z][A-Za-z\s]{0,40}:$")
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,8 @@ class RuleBasedSentenceClaimExtractor(ClaimExtractor):
         for sentence_text, start_char, end_char in _split_sentences_with_offsets(
             chunk.chunk_text,
         ):
+            if _is_skippable_sentence(sentence_text):
+                continue
             score = self._score_sentence(sentence_text)
             if score < self.config.threshold:
                 continue
@@ -141,10 +148,57 @@ _ATTRIBUTION_REPORTING_CUES = (
     "according to",
 )
 
+_SKIP_EXACT_SENTENCES = {
+    "acknowledgements",
+    "acknowledgment",
+    "references",
+    "reference",
+    "table",
+    "tables",
+    "figure",
+    "figures",
+    "quote",
+    "quotes",
+}
+
 
 def _contains_phrase(text: str, phrases: tuple[str, ...]) -> bool:
     """Return true when text includes at least one phrase cue."""
     return any(phrase in text for phrase in phrases)
+
+
+def _is_skippable_sentence(sentence_text: str) -> bool:
+    """Return true when sentence should be excluded from claim extraction."""
+    normalized = _normalize_claim_text(sentence_text)
+    lowered = normalized.casefold().rstrip(".:;,-")
+
+    if lowered in _SKIP_EXACT_SENTENCES:
+        return True
+    if _SKIP_HEADING_RE.match(normalized) is not None:
+        return True
+    if _SKIP_LABEL_RE.match(normalized) is not None:
+        return True
+    if normalized.endswith(":") or normalized.endswith(":."):
+        return True
+    if "|" in normalized or "\t" in normalized:
+        return True
+    if normalized.startswith(">"):
+        return True
+    if _is_quoted_block(normalized):
+        return True
+    return False
+
+
+def _is_quoted_block(text: str) -> bool:
+    """Return true when sentence appears to be a standalone quoted block."""
+    trimmed = text.strip().rstrip(".:;,-")
+    if len(trimmed) < 2:
+        return False
+    quote_pairs = (("\"", "\""), ("'", "'"), ("\u201c", "\u201d"))
+    return any(
+        trimmed.startswith(start) and trimmed.endswith(end)
+        for start, end in quote_pairs
+    )
 
 
 def _contains_quantitative_cue(text: str) -> bool:
@@ -155,28 +209,45 @@ def _contains_quantitative_cue(text: str) -> bool:
 def _split_sentences_with_offsets(text: str) -> list[tuple[str, int, int]]:
     """Split text into sentence-like units with stable character offsets."""
     segments: list[tuple[str, int, int]] = []
-    cursor = 0
-    text_length = len(text)
+    sentence_start = 0
 
-    while cursor < text_length:
-        match = _SENTENCE_END_RE.search(text, cursor)
-        if match is None:
-            end = text_length
-        else:
-            end = match.end()
+    for index, char in enumerate(text):
+        if char not in ".!?":
+            continue
+        if _is_decimal_point(text=text, index=index):
+            continue
 
-        raw_segment = text[cursor:end]
+        end = index + 1
+        raw_segment = text[sentence_start:end]
         stripped = raw_segment.strip()
         if stripped:
             leading_ws = len(raw_segment) - len(raw_segment.lstrip())
             trailing_ws = len(raw_segment) - len(raw_segment.rstrip())
-            start_char = cursor + leading_ws
+            start_char = sentence_start + leading_ws
             end_char = end - trailing_ws
             segments.append((text[start_char:end_char], start_char, end_char))
+        sentence_start = end
 
-        cursor = end
+    if sentence_start < len(text):
+        raw_segment = text[sentence_start:]
+        stripped = raw_segment.strip()
+        if stripped:
+            leading_ws = len(raw_segment) - len(raw_segment.lstrip())
+            trailing_ws = len(raw_segment) - len(raw_segment.rstrip())
+            start_char = sentence_start + leading_ws
+            end_char = len(text) - trailing_ws
+            segments.append((text[start_char:end_char], start_char, end_char))
 
     return segments
+
+
+def _is_decimal_point(*, text: str, index: int) -> bool:
+    """Return true when one dot is part of a numeric decimal token."""
+    if text[index] != ".":
+        return False
+    if index == 0 or index >= len(text) - 1:
+        return False
+    return text[index - 1].isdigit() and text[index + 1].isdigit()
 
 
 def _normalize_claim_text(sentence_text: str) -> str:

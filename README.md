@@ -11,7 +11,7 @@ DDD-first policy document acquisition prototype.
 
 - Install dependencies and create/update lockfile: `uv sync`
 - Run tests: `uv run pytest`
-- Run lint: `uv run ruff check .`
+- Run lint: `uv run ruff check . --fix`
 - Run formatting check: `uv run ruff format --check .`
 - Run type checks: `uv run mypy .`
 
