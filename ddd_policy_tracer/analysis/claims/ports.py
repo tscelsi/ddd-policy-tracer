@@ -30,6 +30,9 @@ class ClaimRepository(Protocol):
     def add_claims(self, claims: list[ClaimCandidate]) -> int:
         """Persist claim candidates and return inserted claim count."""
 
+    def list_claims(self, *, chunk_id: str | None = None) -> list[ClaimCandidate]:
+        """Load persisted claim candidates, optionally by chunk identity."""
+
 
 class ClaimExtractor(Protocol):
     """Extract claim candidates from one source chunk."""

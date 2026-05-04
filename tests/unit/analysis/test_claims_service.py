@@ -36,7 +36,22 @@ class FixedExtractor:
 
     def extract(self, *, chunk: DocumentChunk) -> list[ClaimCandidate]:
         """Return one fixed claim candidate for any chunk."""
-        return [ClaimCandidate(evidence_text=chunk.chunk_text)]
+        return [
+            ClaimCandidate(
+                claim_id="claim_1",
+                chunk_id=chunk.chunk_id,
+                source_id=chunk.source_id,
+                source_document_id=chunk.source_document_id,
+                document_checksum=chunk.document_checksum,
+                start_char=chunk.start_char,
+                end_char=chunk.end_char,
+                evidence_text=chunk.chunk_text,
+                normalized_claim_text=chunk.chunk_text,
+                confidence=1.0,
+                claim_type=None,
+                extractor_version="fixed-v1",
+            ),
+        ]
 
     def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
         """Return deterministic sentence count for report output."""

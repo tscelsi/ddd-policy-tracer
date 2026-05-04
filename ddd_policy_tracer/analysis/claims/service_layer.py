@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ddd_policy_tracer.utils.events.local import LocalPublisher
-
 from .models import ClaimExtractionReport
 from .ports import (
     ChunkRepository,
     ClaimExtractor,
     ClaimRepository,
+    EventPublisher,
 )
 
 
@@ -21,7 +20,7 @@ class ClaimsService:
     chunk_repository: ChunkRepository
     claim_repository: ClaimRepository
     extractor: ClaimExtractor
-    event_publisher: LocalPublisher
+    event_publisher: EventPublisher
 
     def extract_claims_for_chunk(self, *, chunk_id: str) -> ClaimExtractionReport:
         """Extract and persist claims for one chunk identity."""

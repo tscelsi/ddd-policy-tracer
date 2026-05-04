@@ -10,7 +10,18 @@ from typing import Literal
 class ClaimCandidate:
     """Represent one extracted claim candidate for persistence and review."""
 
+    claim_id: str
+    chunk_id: str
+    source_id: str
+    source_document_id: str
+    document_checksum: str
+    start_char: int
+    end_char: int
     evidence_text: str
+    normalized_claim_text: str
+    confidence: float
+    claim_type: str | None
+    extractor_version: str
 
 
 @dataclass(frozen=True)
