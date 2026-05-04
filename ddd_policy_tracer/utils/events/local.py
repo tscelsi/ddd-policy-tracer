@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any, NoReturn
 from uuid import uuid4
 
-from utils.logger import CustomLoggingAdapter
+from ddd_policy_tracer.utils.logger import CustomLoggingAdapter
 
 from .base import AbstractSubscriber, Topic
 
@@ -13,8 +13,8 @@ class LocalPublisher:
     def __init__(self):
         self._id = uuid4()
         self._latest_event: dict[str, Any] | None = None
-        self.subscribers: dict[Topic, list["LocalSubscriber"]] = defaultdict(
-            list
+        self.subscribers: dict[Topic, list[LocalSubscriber]] = defaultdict(
+            list,
         )
         self._logger = CustomLoggingAdapter(
             logging.getLogger(__name__),

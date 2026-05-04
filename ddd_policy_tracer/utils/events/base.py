@@ -7,7 +7,7 @@ import typing
 from typing import Any
 from uuid import uuid4
 
-from utils.logger import CustomLoggingAdapter
+from ddd_policy_tracer.utils.logger import CustomLoggingAdapter
 
 type Topic = str
 
