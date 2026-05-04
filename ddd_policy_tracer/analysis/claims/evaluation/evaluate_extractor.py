@@ -57,13 +57,9 @@ def run(
             chunk_text=record["chunk_text"],
         )
         predicted = {
-            _normalize_text(claim.normalized_claim_text)
-            for claim in extractor.extract(chunk=chunk)
+            _normalize_text(claim.normalized_claim_text) for claim in extractor.extract(chunk=chunk)
         }
-        gold = {
-            _normalize_text(claim["normalized_claim_text"])
-            for claim in record["gold_claims"]
-        }
+        gold = {_normalize_text(claim["normalized_claim_text"]) for claim in record["gold_claims"]}
 
         tp = len(predicted.intersection(gold))
         fp = len(predicted - gold)
@@ -86,6 +82,10 @@ def run(
                 "precision": precision,
                 "recall": recall,
                 "f1": f1,
+                "claims": {
+                    "predicted": list(predicted),
+                    "gold": list(gold),
+                },
             },
         )
         run_logger.debug(
