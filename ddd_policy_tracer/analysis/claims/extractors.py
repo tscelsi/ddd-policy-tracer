@@ -2,14 +2,180 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Any, Protocol
+
+import httpx
 
 from ddd_policy_tracer.analysis.chunking_models import DocumentChunk
 
 from .models import ClaimCandidate
 from .ports import ClaimExtractor
+
+OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+
+
+class HttpClient(Protocol):
+    """Minimal HTTP client protocol for LLM extraction transport."""
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, Any],
+    ) -> httpx.Response:
+        """Send one JSON HTTP POST request and return response."""
+
+
+@dataclass(frozen=True)
+class LLMClaimExtractorConfig:
+    """Configure an LLM-backed claim extraction strategy."""
+
+    model: str = "gpt-4.1-mini"
+    temperature: float = 0.0
+    max_claims_per_chunk: int = 8
+    request_timeout_seconds: float = 60.0
+    api_url: str = OPENAI_CHAT_COMPLETIONS_URL
+    extractor_version: str = "llm-v1"
+    api_key_env_var: str = "OPENAI_API_KEY"
+
+
+@dataclass(frozen=True)
+class LLMClaimExtractor(ClaimExtractor):
+    """Extract claim candidates by prompting an LLM with chunk text."""
+
+    config: LLMClaimExtractorConfig = LLMClaimExtractorConfig()
+    http_client: HttpClient | None = None
+
+    def extract(self, *, chunk: DocumentChunk) -> list[ClaimCandidate]:
+        """Return claim candidates extracted from one chunk via an LLM."""
+        api_key = os.environ.get(self.config.api_key_env_var)
+        if api_key is None:
+            raise ValueError(
+                f"{self.config.api_key_env_var} must be set for LLM extraction",
+            )
+
+        claims = self._request_claim_strings(api_key=api_key, chunk=chunk)
+        candidates: list[ClaimCandidate] = []
+        used_spans: set[tuple[int, int]] = set()
+
+        for claim_text in claims:
+            normalized_claim = _normalize_claim_text(claim_text)
+            if not normalized_claim:
+                continue
+
+            offsets = _find_claim_offsets(
+                chunk_text=chunk.chunk_text,
+                claim_text=claim_text,
+                used_spans=used_spans,
+            )
+            if offsets is None:
+                continue
+
+            start_char, end_char = offsets
+            used_spans.add(offsets)
+            evidence_text = chunk.chunk_text[start_char:end_char]
+            claim_id = _build_claim_id(
+                chunk_id=chunk.chunk_id,
+                start_char=start_char,
+                end_char=end_char,
+                normalized_claim_text=_normalize_claim_text(evidence_text),
+                extractor_version=self.config.extractor_version,
+            )
+            candidates.append(
+                ClaimCandidate(
+                    claim_id=claim_id,
+                    chunk_id=chunk.chunk_id,
+                    source_id=chunk.source_id,
+                    source_document_id=chunk.source_document_id,
+                    document_checksum=chunk.document_checksum,
+                    start_char=start_char,
+                    end_char=end_char,
+                    evidence_text=evidence_text,
+                    normalized_claim_text=_normalize_claim_text(evidence_text),
+                    confidence=1.0,
+                    claim_type=None,
+                    extractor_version=self.config.extractor_version,
+                ),
+            )
+
+        return candidates
+
+    def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
+        """Count sentence units in chunk text for report semantics."""
+        return len(_split_sentences_with_offsets(chunk.chunk_text))
+
+    def _request_claim_strings(
+        self,
+        *,
+        api_key: str,
+        chunk: DocumentChunk,
+    ) -> list[str]:
+        """Call LLM endpoint and return raw claim strings."""
+        prompt = (
+            "Extract policy-relevant claims from the text. "
+            "Return only claims that are exact substrings from input text. "
+            "Return JSON object with key claims as array of strings. "
+            f"Limit to at most {self.config.max_claims_per_chunk} claims."
+        )
+        payload = {
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a strict claim extraction assistant. "
+                        "Do not paraphrase."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"{prompt}\n\nTEXT:\n{chunk.chunk_text}",
+                },
+            ],
+            "response_format": {"type": "json_object"},
+        }
+
+        if self.http_client is None:
+            with httpx.Client(
+                timeout=self.config.request_timeout_seconds,
+            ) as client:
+                response = client.post(
+                    self.config.api_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+        else:
+            response = self.http_client.post(
+                self.config.api_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+
+        response.raise_for_status()
+        data = response.json()
+        try:
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            claims = parsed.get("claims", [])
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            raise ValueError("Invalid LLM response format for claim extraction") from exc
+
+        if not isinstance(claims, list):
+            return []
+        return [str(claim).strip() for claim in claims if str(claim).strip()]
 
 _QUANTITATIVE_RE = re.compile(
     r"("  # start capture for readability
@@ -194,11 +360,8 @@ def _is_quoted_block(text: str) -> bool:
     trimmed = text.strip().rstrip(".:;,-")
     if len(trimmed) < 2:
         return False
-    quote_pairs = (("\"", "\""), ("'", "'"), ("\u201c", "\u201d"))
-    return any(
-        trimmed.startswith(start) and trimmed.endswith(end)
-        for start, end in quote_pairs
-    )
+    quote_pairs = (('"', '"'), ("'", "'"), ("\u201c", "\u201d"))
+    return any(trimmed.startswith(start) and trimmed.endswith(end) for start, end in quote_pairs)
 
 
 def _contains_quantitative_cue(text: str) -> bool:
@@ -264,9 +427,38 @@ def _build_claim_id(
     extractor_version: str,
 ) -> str:
     """Create deterministic claim identity tied to sentence and version."""
-    raw_id = (
-        f"{chunk_id}|{start_char}|{end_char}|{normalized_claim_text}|"
-        f"{extractor_version}"
-    )
+    raw_id = f"{chunk_id}|{start_char}|{end_char}|{normalized_claim_text}|{extractor_version}"
     digest = sha256(raw_id.encode("utf-8")).hexdigest()
     return f"claim_{digest[:16]}"
+
+
+def _find_claim_offsets(
+    *,
+    chunk_text: str,
+    claim_text: str,
+    used_spans: set[tuple[int, int]],
+) -> tuple[int, int] | None:
+    """Find claim offsets in chunk text and avoid duplicate span matches."""
+    start = chunk_text.find(claim_text)
+    if start == -1:
+        normalized_claim = _normalize_claim_text(claim_text)
+        if not normalized_claim:
+            return None
+        start = chunk_text.find(normalized_claim)
+        if start == -1:
+            return None
+        claim_text = normalized_claim
+
+    candidate = (start, start + len(claim_text))
+    if candidate not in used_spans:
+        return candidate
+
+    search_start = start + 1
+    while True:
+        next_start = chunk_text.find(claim_text, search_start)
+        if next_start == -1:
+            return None
+        candidate = (next_start, next_start + len(claim_text))
+        if candidate not in used_spans:
+            return candidate
+        search_start = next_start + 1

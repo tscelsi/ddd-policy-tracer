@@ -14,3 +14,6 @@ data/
 .opencode
 
 .DS_Store
+
+*.json
+*.jsonl

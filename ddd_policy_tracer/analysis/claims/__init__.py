@@ -2,6 +2,8 @@
 
 from .adapters import FilesystemChunkRepository, FilesystemClaimRepository
 from .extractors import (
+    LLMClaimExtractor,
+    LLMClaimExtractorConfig,
     RuleBasedClaimExtractorConfig,
     RuleBasedSentenceClaimExtractor,
 )
@@ -24,6 +26,8 @@ __all__ = [
     "EventPublisher",
     "FilesystemChunkRepository",
     "FilesystemClaimRepository",
+    "LLMClaimExtractor",
+    "LLMClaimExtractorConfig",
     "RuleBasedClaimExtractorConfig",
     "RuleBasedSentenceClaimExtractor",
 ]
