@@ -81,3 +81,45 @@ def test_filesystem_claim_repository_persists_claim_records_only(
     assert '"chunk_id"' in raw_lines[0]
     assert '"status"' not in raw_lines[0]
     assert '"processed_sentences"' not in raw_lines[0]
+
+
+def test_filesystem_claim_repository_skips_duplicate_claim_records(
+    tmp_path: Path,
+) -> None:
+    """Skip inserting duplicate claims using configured idempotency fields."""
+    repository = FilesystemClaimRepository(tmp_path / "claims.jsonl")
+    claim = _sample_claim(claim_id="claim_a")
+
+    inserted_first = repository.add_claims([claim])
+    inserted_second = repository.add_claims([claim])
+
+    assert inserted_first == 1
+    assert inserted_second == 0
+    assert repository.list_claims() == [claim]
+
+
+def test_filesystem_claim_repository_allows_distinct_extractor_versions(
+    tmp_path: Path,
+) -> None:
+    """Persist claims with same span when extractor version differs."""
+    repository = FilesystemClaimRepository(tmp_path / "claims.jsonl")
+    claim_v1 = _sample_claim(claim_id="claim_v1")
+    claim_v2 = ClaimCandidate(
+        claim_id="claim_v2",
+        chunk_id=claim_v1.chunk_id,
+        source_id=claim_v1.source_id,
+        source_document_id=claim_v1.source_document_id,
+        document_checksum=claim_v1.document_checksum,
+        start_char=claim_v1.start_char,
+        end_char=claim_v1.end_char,
+        evidence_text=claim_v1.evidence_text,
+        normalized_claim_text=claim_v1.normalized_claim_text,
+        confidence=claim_v1.confidence,
+        claim_type=claim_v1.claim_type,
+        extractor_version="heuristics-v2",
+    )
+
+    inserted = repository.add_claims([claim_v1, claim_v2])
+
+    assert inserted == 2
+    assert repository.list_claims() == [claim_v1, claim_v2]

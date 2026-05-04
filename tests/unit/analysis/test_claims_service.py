@@ -118,15 +118,22 @@ def test_claims_service_processes_one_chunk_and_publishes_status() -> None:
     assert report.processed_sentences == 1
     assert report.error_message is None
     assert len(claim_repo.persisted) == 1
-    assert publisher.events == [
-        {
-            "topic": "claims.extraction.status",
-            "chunk_id": chunk.chunk_id,
-            "status": "completed",
-            "claims_extracted": 1,
-            "processed_sentences": 1,
-        },
-    ]
+    assert len(publisher.events) == 1
+    event = publisher.events[0]
+    assert set(event) == {
+        "topic",
+        "chunk_id",
+        "status",
+        "claims_extracted",
+        "processed_sentences",
+    }
+    assert event == {
+        "topic": "claims.extraction.status",
+        "chunk_id": chunk.chunk_id,
+        "status": "completed",
+        "claims_extracted": 1,
+        "processed_sentences": 1,
+    }
 
 
 def test_claims_service_returns_failed_when_chunk_missing() -> None:
@@ -146,15 +153,23 @@ def test_claims_service_returns_failed_when_chunk_missing() -> None:
     assert report.claims_extracted == 0
     assert report.processed_sentences == 0
     assert report.error_message == "chunk not found"
-    assert publisher.events == [
-        {
-            "topic": "claims.extraction.status",
-            "chunk_id": "unknown",
-            "status": "failed",
-            "claims_extracted": 0,
-            "processed_sentences": 0,
-        },
-    ]
+    assert service.claim_repository.persisted == []
+    assert len(publisher.events) == 1
+    event = publisher.events[0]
+    assert set(event) == {
+        "topic",
+        "chunk_id",
+        "status",
+        "claims_extracted",
+        "processed_sentences",
+    }
+    assert event == {
+        "topic": "claims.extraction.status",
+        "chunk_id": "unknown",
+        "status": "failed",
+        "claims_extracted": 0,
+        "processed_sentences": 0,
+    }
 
 
 def test_claims_service_returns_failed_when_extraction_raises() -> None:
@@ -175,12 +190,20 @@ def test_claims_service_returns_failed_when_extraction_raises() -> None:
     assert report.claims_extracted == 0
     assert report.processed_sentences == 0
     assert report.error_message == "extract failed"
-    assert publisher.events == [
-        {
-            "topic": "claims.extraction.status",
-            "chunk_id": chunk.chunk_id,
-            "status": "failed",
-            "claims_extracted": 0,
-            "processed_sentences": 0,
-        },
-    ]
+    assert service.claim_repository.persisted == []
+    assert len(publisher.events) == 1
+    event = publisher.events[0]
+    assert set(event) == {
+        "topic",
+        "chunk_id",
+        "status",
+        "claims_extracted",
+        "processed_sentences",
+    }
+    assert event == {
+        "topic": "claims.extraction.status",
+        "chunk_id": chunk.chunk_id,
+        "status": "failed",
+        "claims_extracted": 0,
+        "processed_sentences": 0,
+    }
