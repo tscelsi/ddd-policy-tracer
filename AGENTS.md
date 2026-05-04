@@ -16,6 +16,10 @@ Build software around the domain model first, then layer application orchestrati
    - Repositories, Unit of Work, message bus, and external gateways are ports.
    - DB/HTTP/framework code are adapters behind those ports.
    - Dependencies point inward only: adapters depend on ports/domain, never the reverse.
+   - Ports define stable interfaces that the domain/service layer depends on.
+   - Adapters implement ports and translate external data/protocols into domain-safe types.
+   - Public adapter methods must be declared on the corresponding port contract.
+   - Service layer type annotations should target ports, not concrete adapter classes.
 3. Service layer owns use-case orchestration.
    - Service handlers coordinate repositories/UoW/events.
    - Controllers/CLI/API handlers stay thin.
@@ -43,6 +47,7 @@ Boundary rules:
 - No business invariants in adapters.
 - Adapter failures are handled at boundaries and mapped to domain-safe errors.
 - Keep adapter-specific models (ORM/DTO schemas) out of domain entities.
+- Do not leak adapter-only APIs into service/domain usage; if it is used publicly, promote it to the port.
 
 ## 4) Required discovery artifacts before major implementation
 
@@ -131,6 +136,8 @@ When generating or editing code:
 - If terminology conflicts appear, update the glossary first, then code.
 - If architecture tradeoffs are unclear, document options and pick the simplest design that preserves boundaries.
 - Place dependency wiring in a composition root; avoid hidden globals.
+- Prefer this implementation order for boundaries: define/update port -> implement adapter -> wire adapter through service.
+- If you add a new adapter capability, update the port interface in the same change.
 
 ## 10) Definition of done for each significant change
 

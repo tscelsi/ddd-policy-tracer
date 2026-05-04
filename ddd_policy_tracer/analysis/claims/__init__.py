@@ -1,6 +1,10 @@
 """Public exports for claims bounded context."""
 
 from .adapters import FilesystemClaimRepository
+from .extractors import (
+    RuleBasedClaimExtractorConfig,
+    RuleBasedSentenceClaimExtractor,
+)
 from .models import ClaimCandidate, ClaimExtractionReport
 from .ports import (
     ChunkRepository,
@@ -19,4 +23,6 @@ __all__ = [
     "ClaimsService",
     "EventPublisher",
     "FilesystemClaimRepository",
+    "RuleBasedClaimExtractorConfig",
+    "RuleBasedSentenceClaimExtractor",
 ]
