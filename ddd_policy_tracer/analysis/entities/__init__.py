@@ -1,6 +1,6 @@
 """Public exports for entities bounded context."""
 
-from .adapters import FilesystemEntityRepository
+from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
 from .extractors import RuleBasedEntityExtractorConfig, RuleBasedSentenceEntityExtractor
 from .models import EntityExtractionReport, EntityMention, EntityType
 from .ports import (
@@ -20,6 +20,7 @@ __all__ = [
     "EntityRepository",
     "EntityType",
     "EventPublisher",
+    "FilesystemChunkRepository",
     "FilesystemEntityRepository",
     "RuleBasedEntityExtractorConfig",
     "RuleBasedSentenceEntityExtractor",

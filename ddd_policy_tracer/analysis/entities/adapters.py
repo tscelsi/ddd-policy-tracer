@@ -5,8 +5,42 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ddd_policy_tracer.analysis.chunking_models import DocumentChunk
+
 from .models import EntityMention
-from .ports import EntityRepository
+from .ports import ChunkRepository, EntityRepository
+
+
+class FilesystemChunkRepository(ChunkRepository):
+    """Load document chunks from append-only JSONL state."""
+
+    def __init__(self, state_path: Path) -> None:
+        """Bind chunk repository to one JSONL file path on disk."""
+        self._state_path = state_path
+
+    def get_chunk(self, *, chunk_id: str) -> DocumentChunk | None:
+        """Return one chunk by identifier or none when missing."""
+        if not self._state_path.exists():
+            return None
+
+        content = self._state_path.read_text(encoding="utf-8")
+        for raw_line in content.splitlines():
+            if not raw_line.strip():
+                continue
+            payload = json.loads(raw_line)
+            if payload["chunk_id"] != chunk_id:
+                continue
+            return DocumentChunk(
+                chunk_id=payload["chunk_id"],
+                source_id=payload["source_id"],
+                source_document_id=payload["source_document_id"],
+                document_checksum=payload["document_checksum"],
+                chunk_index=payload["chunk_index"],
+                start_char=payload["start_char"],
+                end_char=payload["end_char"],
+                chunk_text=payload["chunk_text"],
+            )
+        return None
 
 
 class FilesystemEntityRepository(EntityRepository):
