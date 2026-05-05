@@ -103,7 +103,7 @@ def test_run_writes_schema_valid_claims_silver_records(tmp_path: Path) -> None:
                         {
                             "message": {
                                 "content": (
-                                    '{"claims": ["Policy should reduce emissions by 4.9%."]}'
+                                    '{"claims": ["Government should ban new coal projects."]}'
                                 ),
                             },
                         },
@@ -114,7 +114,7 @@ def test_run_writes_schema_valid_claims_silver_records(tmp_path: Path) -> None:
                         {
                             "message": {
                                 "content": (
-                                    '{"claims": ["Government should ban new coal projects."]}'
+                                    '{"claims": ["Policy should reduce emissions by 4.9%."]}'
                                 ),
                             },
                         },
@@ -139,6 +139,7 @@ def test_run_writes_schema_valid_claims_silver_records(tmp_path: Path) -> None:
         assert row["label_prompt_version"] == "claims-prompt-v1"
         assert row["dataset_version"] == "claims-silver-v1"
         assert isinstance(row["silver_claims"], list)
+        assert len(row["silver_claims"]) <= 1
 
     persisted_summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert persisted_summary["records_written"] == 2
@@ -186,3 +187,49 @@ def test_run_logs_parse_failures_and_writes_empty_claims_record(tmp_path: Path) 
     failures = summary["chunk_failures"]
     assert isinstance(failures, list)
     assert failures[0]["error_type"] == "llm_parse_failed"
+
+
+def test_run_writes_multiple_rows_when_one_chunk_has_multiple_claims(tmp_path: Path) -> None:
+    """Emit claim-per-row records when one chunk yields multiple claim spans."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    output_path = tmp_path / "claims_silver.jsonl"
+    _write_chunks(chunks_path)
+
+    summary = run(
+        chunks_path=chunks_path,
+        output_path=output_path,
+        sample_size=1,
+        seed=42,
+        model="gpt-4.1-mini",
+        max_claims_per_chunk=5,
+        sleep_seconds=0.0,
+        label_prompt_version="claims-prompt-v1",
+        dataset_version="claims-silver-v1",
+        labeling_run_id="claims_run_001",
+        labeled_at_utc="2026-05-05T12:34:56Z",
+        summary_output_path=None,
+        http_client=StubHttpClient(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"claims": ['
+                                    '"Government should ban new coal projects.", '
+                                    '"coal projects"'
+                                    "]}"
+                                ),
+                            },
+                        },
+                    ],
+                },
+            ],
+        ),
+    )
+
+    rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 2
+    assert all(len(row["silver_claims"]) == 1 for row in rows)
+    assert summary["records_written"] == 2
+    assert summary["claims_written"] == 2

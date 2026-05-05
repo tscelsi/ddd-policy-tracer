@@ -5,63 +5,123 @@ from __future__ import annotations
 import hashlib
 import random
 from collections.abc import Callable, Mapping, Sequence
-from typing import Literal, cast
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 SilverLabelerKind = Literal["llm", "rule", "human"]
 SilverEntityType = Literal["POLICY", "ORG", "PERSON", "JURISDICTION", "PROGRAM"]
-_SILVER_ENTITY_TYPES: tuple[SilverEntityType, ...] = (
-    "POLICY",
-    "ORG",
-    "PERSON",
-    "JURISDICTION",
-    "PROGRAM",
-)
+
+
+class SilverLineage(BaseModel):
+    """Represent required lineage metadata for one silver label record."""
+
+    labeling_run_id: str = Field(min_length=1)
+    labeler_kind: SilverLabelerKind
+    labeler_version: str = Field(min_length=1)
+    label_prompt_version: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    labeled_at_utc: str = Field(min_length=1)
+
+
+class SilverRecordBase(BaseModel):
+    """Represent chunk identity and text fields common to silver records."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_id: str = Field(min_length=1)
+    source_id: str = Field(min_length=1)
+    source_document_id: str = Field(min_length=1)
+    document_checksum: str = Field(min_length=1)
+    chunk_text: str = Field(min_length=1)
+    labeling_run_id: str = Field(min_length=1)
+    labeler_kind: SilverLabelerKind
+    labeler_version: str = Field(min_length=1)
+    label_prompt_version: str = Field(min_length=1)
+    dataset_version: str = Field(min_length=1)
+    labeled_at_utc: str = Field(min_length=1)
+
+
+class SilverClaimLabel(BaseModel):
+    """Represent one silver-labeled claim span in a chunk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+
+    @field_validator("end_char")
+    @classmethod
+    def _validate_end_char(cls, value: int, info: ValidationInfo) -> int:
+        """Ensure claim end offset is strictly greater than start offset."""
+        start_char = info.data.get("start_char")
+        if isinstance(start_char, int) and value <= start_char:
+            raise ValueError("end_char must be greater than start_char")
+        return value
+
+
+class ClaimsSilverRecord(SilverRecordBase):
+    """Represent one validated claims silver dataset row."""
+
+    silver_claims: list[SilverClaimLabel]
+
+
+class SilverEntityLabel(BaseModel):
+    """Represent one silver-labeled entity mention."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    mention_text: str = Field(min_length=1)
+    entity_type: SilverEntityType
+
+    @field_validator("end_char")
+    @classmethod
+    def _validate_end_char(cls, value: int, info: ValidationInfo) -> int:
+        """Ensure end offset is strictly greater than start offset."""
+        start_char = info.data.get("start_char")
+        if isinstance(start_char, int) and value <= start_char:
+            raise ValueError("end_char must be greater than start_char")
+        return value
+
+
+class EntitiesSilverRecord(SilverRecordBase):
+    """Represent one validated entities silver dataset row."""
+
+    silver_entities: list[SilverEntityLabel]
+
 
 def validate_claim_silver_record(record: Mapping[str, object]) -> None:
     """Validate one claims silver record contract with lineage metadata."""
-    _validate_common_record_fields(record)
-    _validate_lineage_metadata(record)
-    labels = _require_list(record, "silver_claims")
-    for index, label in enumerate(labels):
-        if not isinstance(label, Mapping):
-            raise ValueError(f"silver_claims[{index}] must be an object")
-        evidence_text = _require_str(label, "evidence_text")
-        normalized = _require_str(label, "normalized_claim_text")
-        if not evidence_text.strip():
-            raise ValueError(f"silver_claims[{index}].evidence_text must not be empty")
-        if not normalized.strip():
-            raise ValueError(
-                f"silver_claims[{index}].normalized_claim_text must not be empty",
-            )
+    try:
+        ClaimsSilverRecord.model_validate(record)
+    except ValidationError as exc:
+        raise ValueError(_flatten_validation_error(exc)) from exc
 
 
 def validate_entity_silver_record(record: Mapping[str, object]) -> None:
     """Validate one entities silver record contract with lineage metadata."""
-    _validate_common_record_fields(record)
-    _validate_lineage_metadata(record)
-    labels = _require_list(record, "silver_entities")
-    for index, label in enumerate(labels):
-        if not isinstance(label, Mapping):
-            raise ValueError(f"silver_entities[{index}] must be an object")
+    try:
+        EntitiesSilverRecord.model_validate(record)
+    except ValidationError as exc:
+        raise ValueError(_flatten_validation_error(exc)) from exc
 
-        start_char = _require_int(label, "start_char")
-        end_char = _require_int(label, "end_char")
-        if start_char < 0:
-            raise ValueError(f"silver_entities[{index}].start_char must be >= 0")
-        if end_char <= start_char:
-            raise ValueError(
-                f"silver_entities[{index}].end_char must be greater than start_char",
-            )
 
-        mention_text = _require_str(label, "mention_text")
-        if not mention_text.strip():
-            raise ValueError(f"silver_entities[{index}].mention_text must not be empty")
+def parse_claim_silver_record(record: Mapping[str, object]) -> ClaimsSilverRecord:
+    """Parse and return one typed claims silver record."""
+    try:
+        return ClaimsSilverRecord.model_validate(record)
+    except ValidationError as exc:
+        raise ValueError(_flatten_validation_error(exc)) from exc
 
-        entity_type = _require_str(label, "entity_type")
-        if entity_type not in _SILVER_ENTITY_TYPES:
-            raise ValueError(
-                f"silver_entities[{index}].entity_type must be one of {_SILVER_ENTITY_TYPES}",
-            )
+
+def parse_entity_silver_record(record: Mapping[str, object]) -> EntitiesSilverRecord:
+    """Parse and return one typed entities silver record."""
+    try:
+        return EntitiesSilverRecord.model_validate(record)
+    except ValidationError as exc:
+        raise ValueError(_flatten_validation_error(exc)) from exc
 
 
 def deterministic_sample_records[T](
@@ -157,58 +217,9 @@ def _validate_split_ratios(*, train_ratio: float, dev_ratio: float, test_ratio: 
         raise ValueError("split ratios must sum to 1.0")
 
 
-def _validate_common_record_fields(record: Mapping[str, object]) -> None:
-    """Validate fields shared by claims and entities silver records."""
-    for field_name in (
-        "chunk_id",
-        "source_id",
-        "source_document_id",
-        "document_checksum",
-        "chunk_text",
-    ):
-        value = _require_str(record, field_name)
-        if not value.strip():
-            raise ValueError(f"{field_name} must not be empty")
-
-
-def _validate_lineage_metadata(record: Mapping[str, object]) -> None:
-    """Validate required lineage fields for reproducible dataset provenance."""
-    for field_name in (
-        "labeling_run_id",
-        "labeler_kind",
-        "labeler_version",
-        "label_prompt_version",
-        "dataset_version",
-        "labeled_at_utc",
-    ):
-        value = _require_str(record, field_name)
-        if not value.strip():
-            raise ValueError(f"{field_name} must not be empty")
-
-    labeler_kind = _require_str(record, "labeler_kind")
-    if labeler_kind not in ("llm", "rule", "human"):
-        raise ValueError("labeler_kind must be one of ('llm', 'rule', 'human')")
-
-
-def _require_str(payload: Mapping[str, object], field_name: str) -> str:
-    """Read one required string field from a payload mapping."""
-    raw_value = payload.get(field_name)
-    if not isinstance(raw_value, str):
-        raise ValueError(f"{field_name} must be a string")
-    return raw_value
-
-
-def _require_int(payload: Mapping[str, object], field_name: str) -> int:
-    """Read one required integer field from a payload mapping."""
-    raw_value = payload.get(field_name)
-    if not isinstance(raw_value, int):
-        raise ValueError(f"{field_name} must be an integer")
-    return raw_value
-
-
-def _require_list(payload: Mapping[str, object], field_name: str) -> list[object]:
-    """Read one required list field from a payload mapping."""
-    raw_value = payload.get(field_name)
-    if not isinstance(raw_value, list):
-        raise ValueError(f"{field_name} must be a list")
-    return cast(list[object], raw_value)
+def _flatten_validation_error(error: ValidationError) -> str:
+    """Render one concise error message from Pydantic validation errors."""
+    first = error.errors()[0]
+    location = ".".join(str(part) for part in first.get("loc", ("record",)))
+    message = str(first.get("msg", "validation failed"))
+    return f"{location}: {message}"

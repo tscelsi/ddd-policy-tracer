@@ -42,8 +42,8 @@ def test_validate_claim_silver_record_accepts_valid_record() -> None:
         **_base_lineage_fields(),
         "silver_claims": [
             {
-                "evidence_text": "Policy text",
-                "normalized_claim_text": "policy text",
+                "start_char": 0,
+                "end_char": 6,
             },
         ],
     }
@@ -57,13 +57,13 @@ def test_validate_claim_silver_record_requires_lineage_fields() -> None:
         **_base_chunk_fields(),
         "silver_claims": [
             {
-                "evidence_text": "Policy text",
-                "normalized_claim_text": "policy text",
+                "start_char": 0,
+                "end_char": 6,
             },
         ],
     }
 
-    with pytest.raises(ValueError, match="labeling_run_id must be a string"):
+    with pytest.raises(ValueError, match="labeling_run_id: Field required"):
         validate_claim_silver_record(record)
 
 
@@ -100,7 +100,7 @@ def test_validate_entity_silver_record_rejects_invalid_entity_type() -> None:
         ],
     }
 
-    with pytest.raises(ValueError, match="entity_type must be one of"):
+    with pytest.raises(ValueError, match=r"silver_entities\.0\.entity_type"):
         validate_entity_silver_record(record)
 
 

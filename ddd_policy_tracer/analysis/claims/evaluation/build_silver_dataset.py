@@ -51,7 +51,7 @@ def run(
     summary_output_path: Path | None,
     http_client: HttpClient | None = None,
 ) -> dict[str, object]:
-    """Create claims silver JSONL with lineage and deterministic diagnostics."""
+    """Create claims silver JSONL with one record per claim span."""
     api_key = os.environ.get("OPENAI_API_KEY")
     if api_key is None:
         raise ValueError("OPENAI_API_KEY must be set for LLM silver dataset generation")
@@ -104,29 +104,25 @@ def run(
                     parse_error = str(exc)
 
                 deduped_claims = _dedupe_claims(claims)
-                silver_record = {
-                    "chunk_id": chunk["chunk_id"],
-                    "source_id": chunk["source_id"],
-                    "source_document_id": chunk["source_document_id"],
-                    "document_checksum": chunk["document_checksum"],
-                    "chunk_text": chunk["chunk_text"],
-                    "labeling_run_id": run_id,
-                    "labeler_kind": "llm",
-                    "labeler_version": model,
-                    "label_prompt_version": label_prompt_version,
-                    "dataset_version": dataset_version,
-                    "labeled_at_utc": labeled_timestamp,
-                    "silver_claims": [
-                        {
-                            "evidence_text": claim,
-                            "normalized_claim_text": _normalize_text(claim),
-                        }
-                        for claim in deduped_claims
-                    ],
-                }
+                silver_claims: list[dict[str, int]] = []
+                for claim in deduped_claims:
+                    span = _claim_span(chunk_text=chunk["chunk_text"], claim_text=claim)
+                    if span is not None:
+                        silver_claims.append(span)
+
+                silver_records = _to_claim_rows(
+                    chunk=chunk,
+                    run_id=run_id,
+                    model=model,
+                    label_prompt_version=label_prompt_version,
+                    dataset_version=dataset_version,
+                    labeled_timestamp=labeled_timestamp,
+                    silver_claims=silver_claims,
+                )
 
                 try:
-                    validate_claim_silver_record(silver_record)
+                    for silver_record in silver_records:
+                        validate_claim_silver_record(silver_record)
                 except ValueError as exc:
                     diagnostics["invalid_rows"] = int(diagnostics["invalid_rows"]) + 1
                     _append_chunk_failure(
@@ -146,16 +142,20 @@ def run(
                         message=parse_error,
                     )
 
-                handle.write(json.dumps(silver_record, ensure_ascii=True) + "\n")
-                diagnostics["records_written"] = int(diagnostics["records_written"]) + 1
+                for silver_record in silver_records:
+                    handle.write(json.dumps(silver_record, ensure_ascii=True) + "\n")
+                diagnostics["records_written"] = int(diagnostics["records_written"]) + len(
+                    silver_records,
+                )
                 diagnostics["claims_written"] = int(diagnostics["claims_written"]) + len(
-                    silver_record["silver_claims"],
+                    silver_claims,
                 )
 
                 sys.stdout.write(
                     f"[{index}/{len(sampled_records)}] "
                     f"chunk_id={chunk['chunk_id']} "
-                    f"silver_claims={len(silver_record['silver_claims'])}\n",
+                    f"silver_claim_rows={len(silver_records)} "
+                    f"silver_claims={len(silver_claims)}\n",
                 )
                 if sleep_seconds > 0:
                     time.sleep(sleep_seconds)
@@ -330,6 +330,54 @@ def _dedupe_claims(claims: list[str]) -> list[str]:
         seen.add(normalized)
         deduped.append(claim)
     return deduped
+
+
+def _claim_span(*, chunk_text: str, claim_text: str) -> dict[str, int] | None:
+    """Resolve one claim string to chunk-local start/end offsets."""
+    start_char = chunk_text.find(claim_text)
+    if start_char == -1:
+        normalized_claim = _normalize_text(claim_text)
+        if not normalized_claim:
+            return None
+        start_char = chunk_text.find(normalized_claim)
+        if start_char == -1:
+            return None
+        claim_text = normalized_claim
+
+    end_char = start_char + len(claim_text)
+    return {
+        "start_char": start_char,
+        "end_char": end_char,
+    }
+
+
+def _to_claim_rows(
+    *,
+    chunk: dict[str, str],
+    run_id: str,
+    model: str,
+    label_prompt_version: str,
+    dataset_version: str,
+    labeled_timestamp: str,
+    silver_claims: list[dict[str, int]],
+) -> list[dict[str, object]]:
+    """Convert one chunk and its claims into claim-per-row silver records."""
+    common_fields: dict[str, object] = {
+        "chunk_id": chunk["chunk_id"],
+        "source_id": chunk["source_id"],
+        "source_document_id": chunk["source_document_id"],
+        "document_checksum": chunk["document_checksum"],
+        "chunk_text": chunk["chunk_text"],
+        "labeling_run_id": run_id,
+        "labeler_kind": "llm",
+        "labeler_version": model,
+        "label_prompt_version": label_prompt_version,
+        "dataset_version": dataset_version,
+        "labeled_at_utc": labeled_timestamp,
+    }
+    if not silver_claims:
+        return [{**common_fields, "silver_claims": []}]
+    return [{**common_fields, "silver_claims": [claim]} for claim in silver_claims]
 
 
 def _normalize_text(value: str) -> str:

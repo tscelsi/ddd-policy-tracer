@@ -7,7 +7,10 @@ requires-python = ">=3.12"
 dependencies = [
     "bs4>=0.0.2",
     "httpx>=0.28.1",
+    "nltk>=3.9.4",
+    "pydantic>=2.13.3",
     "pypdf>=6.10.2",
+    "scikit-learn>=1.8.0",
     "spacy>=3.8.14",
 ]
 

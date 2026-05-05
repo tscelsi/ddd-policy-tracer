@@ -9,8 +9,8 @@ from collections import Counter
 from pathlib import Path
 
 from ddd_policy_tracer.analysis.silver_dataset import (
-    validate_claim_silver_record,
-    validate_entity_silver_record,
+    parse_claim_silver_record,
+    parse_entity_silver_record,
 )
 
 
@@ -44,15 +44,12 @@ def _qa_claims_dataset(*, dataset_path: Path) -> dict[str, object]:
 
     for row in rows:
         try:
-            validate_claim_silver_record(row)
+            parsed = parse_claim_silver_record(row)
         except ValueError:
             invalid_rows += 1
             continue
 
-        labels = row["silver_claims"]
-        if not isinstance(labels, list):
-            invalid_rows += 1
-            continue
+        labels = parsed.silver_claims
         total_claims += len(labels)
         if len(labels) == 0:
             empty_label_rows += 1
@@ -83,43 +80,23 @@ def _qa_entities_dataset(*, dataset_path: Path) -> dict[str, object]:
 
     for row in rows:
         try:
-            validate_entity_silver_record(row)
+            parsed = parse_entity_silver_record(row)
         except ValueError:
             invalid_rows += 1
             continue
 
-        labels = row["silver_entities"]
-        if not isinstance(labels, list):
-            invalid_rows += 1
-            continue
+        labels = parsed.silver_entities
 
         if len(labels) == 0:
             empty_label_rows += 1
 
-        chunk_text = row["chunk_text"]
-        if not isinstance(chunk_text, str):
-            invalid_rows += 1
-            continue
+        chunk_text = parsed.chunk_text
 
         for label in labels:
-            if not isinstance(label, dict):
-                invalid_rows += 1
-                continue
-            entity_type = label.get("entity_type")
-            if not isinstance(entity_type, str):
-                invalid_type_mentions += 1
-                continue
-
-            start_char = label.get("start_char")
-            end_char = label.get("end_char")
-            mention_text = label.get("mention_text")
-            if (
-                not isinstance(start_char, int)
-                or not isinstance(end_char, int)
-                or not isinstance(mention_text, str)
-            ):
-                offset_mismatch_mentions += 1
-                continue
+            entity_type = label.entity_type
+            start_char = label.start_char
+            end_char = label.end_char
+            mention_text = label.mention_text
 
             if start_char < 0 or end_char > len(chunk_text) or end_char <= start_char:
                 offset_mismatch_mentions += 1

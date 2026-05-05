@@ -35,7 +35,7 @@ def test_run_reports_claims_and_entities_diagnostics(tmp_path: Path) -> None:
                     "label_prompt_version": "claims-prompt-v1",
                     "dataset_version": "claims-silver-v1",
                     "labeled_at_utc": "2026-05-05T12:34:56Z",
-                    "silver_claims": [{"evidence_text": "Text.", "normalized_claim_text": "Text."}],
+                    "silver_claims": [{"start_char": 0, "end_char": 5}],
                 },
                 ensure_ascii=True,
             ),
