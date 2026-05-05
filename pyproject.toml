@@ -8,6 +8,7 @@ dependencies = [
     "bs4>=0.0.2",
     "httpx>=0.28.1",
     "pypdf>=6.10.2",
+    "spacy>=3.8.14",
 ]
 
 [dependency-groups]

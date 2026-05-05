@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from ddd_policy_tracer.discovery.domain import SourceDocumentVersion
 
@@ -30,13 +29,11 @@ def chunk_and_persist_document_versions(
     *,
     versions: list[SourceDocumentVersion],
     state_path: Path,
-    repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
     config: ChunkingConfig | None = None,
 ) -> ChunkingReport:
     """Chunk source document versions and persist new chunk records."""
     repository = _build_repository(
         state_path=state_path,
-        repository_backend=repository_backend,
     )
     active_config = config or ChunkingConfig()
 
@@ -75,9 +72,6 @@ def chunk_and_persist_document_versions(
 def _build_repository(
     *,
     state_path: Path,
-    repository_backend: Literal["sqlite", "filesystem"],
 ) -> SQLiteDocumentChunkRepository | FilesystemDocumentChunkRepository:
     """Build the configured chunk repository adapter."""
-    if repository_backend == "filesystem":
-        return FilesystemDocumentChunkRepository(state_path)
-    return SQLiteDocumentChunkRepository(state_path)
+    return FilesystemDocumentChunkRepository(state_path)

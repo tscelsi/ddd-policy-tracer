@@ -31,3 +31,9 @@ The analysis context should preserve that provenance while adding:
 
 - `PIPELINE.md`: end-to-end architecture, diagrams, stage contracts, and quality gates.
 - `ROADMAP.md`: phased implementation plan with start recommendations.
+
+
+## Pipeline stages
+
+1. **Chunking**: Break documents into text chunks with metadata (eventually will chunk semantically meaningful units, but for now sentence-based).
+2. **Extraction**: Identify claims, entities, and relationships within chunks.

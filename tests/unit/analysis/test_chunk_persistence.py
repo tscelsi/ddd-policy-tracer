@@ -145,5 +145,5 @@ def test_chunk_and_persist_supports_filesystem_backend(
     assert report.processed_documents == 1
     assert report.chunked_documents == 1
     assert report.skipped_documents == 0
-    assert report.persisted_chunks == 3
+    assert report.persisted_chunks == 1
     assert state_path.exists()

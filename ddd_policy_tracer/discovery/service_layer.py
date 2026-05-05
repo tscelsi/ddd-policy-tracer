@@ -57,9 +57,7 @@ class AcquisitionEvent:
     source_id: str
     source_url: str | None = None
     source_document_id: str | None = None
-    run_status: (
-        Literal["completed", "completed_with_failures", "failed"] | None
-    ) = None
+    run_status: Literal["completed", "completed_with_failures", "failed"] | None = None
 
 
 def ingest_source_documents(
@@ -125,10 +123,7 @@ def ingest_source_documents(
                 source_id=source_id,
                 source_document_id=source_document_id,
             )
-            if (
-                latest_version is not None
-                and latest_version.checksum == checksum
-            ):
+            if latest_version is not None and latest_version.checksum == checksum:
                 entry_logger.info("no-op: checksum unchanged")
                 continue
 
@@ -185,7 +180,9 @@ def ingest_source_documents(
 
     if failed_documents == 0:
         run_status: Literal[
-            "completed", "completed_with_failures", "failed",
+            "completed",
+            "completed_with_failures",
+            "failed",
         ] = "completed"
     elif ingested_documents == 0:
         run_status = "failed"
@@ -230,7 +227,6 @@ def get_source_document_versions(
     state_path: Path | None = None,
     sqlite_path: Path | None = None,
     source_id: str,
-    repository_backend: Literal["sqlite", "filesystem"] = "sqlite",
 ) -> list[SourceDocumentVersion]:
     """Load persisted source document versions for one source."""
     resolved_state_path = state_path or sqlite_path
@@ -239,7 +235,6 @@ def get_source_document_versions(
 
     repository = _build_repository(
         state_path=resolved_state_path,
-        repository_backend=repository_backend,
     )
     return repository.list_versions(source_id=source_id)
 
@@ -247,9 +242,6 @@ def get_source_document_versions(
 def _build_repository(
     *,
     state_path: Path,
-    repository_backend: Literal["sqlite", "filesystem"],
 ) -> SQLiteSourceDocumentRepository | FilesystemSourceDocumentRepository:
     """Build the configured repository adapter for source versions."""
-    if repository_backend == "filesystem":
-        return FilesystemSourceDocumentRepository(state_path)
-    return SQLiteSourceDocumentRepository(state_path)
+    return FilesystemSourceDocumentRepository(state_path)

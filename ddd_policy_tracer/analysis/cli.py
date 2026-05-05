@@ -38,21 +38,9 @@ def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
         help="Path to acquisition state (SQLite DB or JSONL file).",
     )
     chunk_parser.add_argument(
-        "--repository-backend",
-        choices=["sqlite", "filesystem"],
-        default="sqlite",
-        help="Backend used by acquisition state persistence.",
-    )
-    chunk_parser.add_argument(
         "--chunk-state-path",
         required=True,
         help="Path where chunk records will be persisted.",
-    )
-    chunk_parser.add_argument(
-        "--chunk-repository-backend",
-        choices=["sqlite", "filesystem"],
-        default="sqlite",
-        help="Backend used for chunk persistence.",
     )
     chunk_parser.add_argument(
         "--chunk-size-chars",
@@ -75,7 +63,6 @@ def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
     versions = get_source_document_versions(
         state_path=Path(args.state_path),
         source_id=args.source,
-        repository_backend=args.repository_backend,
     )
     config = ChunkingConfig(
         chunk_size_chars=args.chunk_size_chars,
@@ -84,7 +71,6 @@ def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
     report = chunk_and_persist_document_versions(
         versions=versions,
         state_path=Path(args.chunk_state_path),
-        repository_backend=args.chunk_repository_backend,
         config=config,
     )
     stdout.write(
