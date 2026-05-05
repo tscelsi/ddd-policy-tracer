@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ddd_policy_tracer.analysis.chunking_models import DocumentChunk
+from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 from ddd_policy_tracer.analysis.entities.extractors import (
     RuleBasedEntityExtractorConfig,
     RuleBasedSentenceEntityExtractor,

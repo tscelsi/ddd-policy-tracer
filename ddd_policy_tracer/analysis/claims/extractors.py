@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from ddd_policy_tracer.analysis.chunking_models import DocumentChunk
+from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 
 from .models import ClaimCandidate
 from .ports import ClaimExtractor

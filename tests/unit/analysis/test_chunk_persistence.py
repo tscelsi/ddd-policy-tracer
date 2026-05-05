@@ -6,11 +6,11 @@ from ddd_policy_tracer.analysis import (
     ChunkingConfig,
     chunk_and_persist_document_versions,
 )
-from ddd_policy_tracer.analysis.adapters import (
+from ddd_policy_tracer.analysis.chunks.adapters import (
     FilesystemDocumentChunkRepository,
     SQLiteDocumentChunkRepository,
 )
-from ddd_policy_tracer.analysis.chunking_models import DocumentChunk
+from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 from ddd_policy_tracer.discovery.domain import SourceDocumentVersion
 
 

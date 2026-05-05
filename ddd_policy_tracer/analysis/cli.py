@@ -11,8 +11,8 @@ from ddd_policy_tracer.discovery.service_layer import (
     get_source_document_versions,
 )
 
-from .chunking_models import ChunkingConfig
-from .service_layer import chunk_and_persist_document_versions
+from .chunks.chunking_models import ChunkingConfig
+from .chunks.service_layer import chunk_and_persist_document_versions
 
 
 def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
