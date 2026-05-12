@@ -631,3 +631,47 @@ def test_run_returns_zero_exit_when_anomalies_within_limit(tmp_path: Path) -> No
     )
 
     assert result.exit_code == 0
+
+
+def test_run_graph_html_references_cytoscape_and_filtered_graph(tmp_path: Path) -> None:
+    """Render static viewer with Cytoscape and filtered graph loading."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
+    _write_jsonl(
+        claims_path,
+        [
+            _claim_row(
+                claim_id="claim-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+            ),
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="ORG",
+            ),
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+    )
+
+    html = (result.run_directory / "graph.html").read_text(encoding="utf-8")
+    assert "cytoscape" in html
+    assert "graph.filtered.json" in html
+    assert "Selection" in html

@@ -21,6 +21,7 @@ from .materializer import materialize_graph_with_entities
 from .repositories import JsonlClaimRepository, JsonlEntityRepository
 from .sinks import GraphSink, JsonArtifactSink
 from .validation import collect_input_anomalies
+from .viewer import render_graph_html
 
 
 @dataclass(frozen=True)
@@ -104,7 +105,7 @@ def scaffold_graph_artifacts(
         anomalies=validation_report.anomalies,
         generated_at=generated_at,
     )
-    _write_placeholder_html_artifact(output_directory=run_directory)
+    render_graph_html(output_directory=run_directory)
     _copy_run_artifacts_to_latest(run_directory=run_directory, latest_directory=latest_directory)
 
     return GraphScaffoldResult(
@@ -143,26 +144,3 @@ def _copy_run_artifacts_to_latest(*, run_directory: Path, latest_directory: Path
             continue
         shutil.copy2(source_file, latest_directory / source_file.name)
 
-
-def _write_placeholder_html_artifact(*, output_directory: Path) -> None:
-    """Write placeholder HTML artifact for scaffold output."""
-    html_path = output_directory / "graph.html"
-    html_path.write_text(
-        "\n".join(
-            [
-                "<!doctype html>",
-                "<html lang=\"en\">",
-                "  <head>",
-                "    <meta charset=\"utf-8\">",
-                "    <title>Policy Tracer Graph (Scaffold)</title>",
-                "  </head>",
-                "  <body>",
-                "    <h1>Policy Tracer Graph Scaffold</h1>",
-                "    <p>Graph rendering is not implemented in this scaffold run.</p>",
-                "  </body>",
-                "</html>",
-                "",
-            ],
-        ),
-        encoding="utf-8",
-    )
