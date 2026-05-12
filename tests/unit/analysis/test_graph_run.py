@@ -334,3 +334,152 @@ def test_run_uses_type_sensitive_entity_dedup_key(tmp_path: Path) -> None:
     graph_payload = json.loads((result.run_directory / "graph.json").read_text(encoding="utf-8"))
     entity_nodes = [node for node in graph_payload["nodes"] if node["type"] == "MentionedEntity"]
     assert len(entity_nodes) == 2
+
+
+def test_run_writes_filtered_connected_triads_with_default_thresholds(tmp_path: Path) -> None:
+    """Keep only connected triads that satisfy default confidence thresholds."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}, {"chunk_id": "chunk-2"}])
+    _write_jsonl(
+        claims_path,
+        [
+            {
+                **_claim_row(
+                    claim_id="claim-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                ),
+                "confidence": 0.95,
+            },
+            {
+                **_claim_row(
+                    claim_id="claim-2",
+                    chunk_id="chunk-2",
+                    source_id="australia_institute",
+                ),
+                "confidence": 0.5,
+            },
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            {
+                **_entity_row(
+                    entity_id="entity-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                    mention_text="normalized",
+                    normalized_mention_text="normalized",
+                    entity_type="ORG",
+                ),
+                "confidence": 0.8,
+            },
+            {
+                **_entity_row(
+                    entity_id="entity-2",
+                    chunk_id="chunk-2",
+                    source_id="australia_institute",
+                    mention_text="normalized",
+                    normalized_mention_text="normalized",
+                    entity_type="ORG",
+                ),
+                "confidence": 0.8,
+            },
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+    )
+
+    full_payload = json.loads((result.run_directory / "graph.json").read_text(encoding="utf-8"))
+    filtered_payload = json.loads(
+        (result.run_directory / "graph.filtered.json").read_text(encoding="utf-8"),
+    )
+    assert len(full_payload["nodes"]) > len(filtered_payload["nodes"])
+    assert len(full_payload["edges"]) > len(filtered_payload["edges"])
+    filtered_claim_ids = {
+        node["id"]
+        for node in filtered_payload["nodes"]
+        if node["type"] == "Claim"
+    }
+    assert filtered_claim_ids == {"claim-1"}
+    assert filtered_payload["thresholds"]["claim_confidence_min"] == 0.6
+    assert filtered_payload["thresholds"]["entity_confidence_min"] == 0.7
+
+
+def test_run_applies_override_thresholds_to_filtered_graph(tmp_path: Path) -> None:
+    """Allow lower threshold overrides to include additional connected claims."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}, {"chunk_id": "chunk-2"}])
+    _write_jsonl(
+        claims_path,
+        [
+            {
+                **_claim_row(
+                    claim_id="claim-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                ),
+                "confidence": 0.95,
+            },
+            {
+                **_claim_row(
+                    claim_id="claim-2",
+                    chunk_id="chunk-2",
+                    source_id="australia_institute",
+                ),
+                "confidence": 0.5,
+            },
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="normalized",
+                normalized_mention_text="normalized",
+                entity_type="ORG",
+            ),
+            _entity_row(
+                entity_id="entity-2",
+                chunk_id="chunk-2",
+                source_id="australia_institute",
+                mention_text="normalized",
+                normalized_mention_text="normalized",
+                entity_type="ORG",
+            ),
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+        claim_confidence_min=0.4,
+        entity_confidence_min=0.7,
+    )
+
+    filtered_payload = json.loads(
+        (result.run_directory / "graph.filtered.json").read_text(encoding="utf-8"),
+    )
+    filtered_claim_ids = {
+        node["id"]
+        for node in filtered_payload["nodes"]
+        if node["type"] == "Claim"
+    }
+    assert filtered_claim_ids == {"claim-1", "claim-2"}

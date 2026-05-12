@@ -16,6 +16,7 @@ from .contracts import (
     GraphSummary,
     GraphThresholds,
 )
+from .filtering import build_filtered_graph
 from .materializer import materialize_graph_with_entities
 from .repositories import JsonlClaimRepository, JsonlEntityRepository
 from .sinks import GraphSink, JsonArtifactSink
@@ -67,6 +68,7 @@ def scaffold_graph_artifacts(
         nodes=materialized.nodes,
         edges=materialized.edges,
     )
+    filtered_artifact = build_filtered_graph(artifact=artifact, thresholds=thresholds)
     summary = GraphSummary(
         schema_version=GRAPH_SCHEMA_VERSION,
         generated_at=generated_at,
@@ -79,11 +81,11 @@ def scaffold_graph_artifacts(
         output_directory=str(run_directory),
         latest_directory=str(latest_directory),
         thresholds=thresholds,
-        stats=stats,
+        stats=filtered_artifact.stats,
     )
 
     sink.write_full_graph(artifact=artifact)
-    sink.write_filtered_graph(artifact=artifact)
+    sink.write_filtered_graph(artifact=filtered_artifact)
     sink.write_summary(summary=summary)
     _write_placeholder_artifacts(output_directory=run_directory, generated_at=generated_at)
     _copy_run_artifacts_to_latest(run_directory=run_directory, latest_directory=latest_directory)
