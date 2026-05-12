@@ -20,6 +20,7 @@ from .filtering import build_filtered_graph
 from .materializer import materialize_graph_with_entities
 from .repositories import JsonlClaimRepository, JsonlEntityRepository
 from .sinks import GraphSink, JsonArtifactSink
+from .validation import collect_input_anomalies
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class GraphScaffoldResult:
     run_directory: Path
     latest_directory: Path
     summary: GraphSummary
+    exit_code: int
 
 
 def scaffold_graph_artifacts(
@@ -39,6 +41,7 @@ def scaffold_graph_artifacts(
     output_root: Path,
     thresholds: GraphThresholds,
     source_id: str | None = None,
+    max_anomalies: int = 0,
 ) -> GraphScaffoldResult:
     """Write Stage 5 graph scaffold artifacts for one execution."""
     run_directory = output_root / _build_run_directory_name()
@@ -46,6 +49,12 @@ def scaffold_graph_artifacts(
     sink: GraphSink = JsonArtifactSink(output_dir=run_directory)
 
     generated_at = utc_now_isoformat()
+    validation_report = collect_input_anomalies(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+    )
+
     claim_repository = JsonlClaimRepository(path=claims_path)
     entity_repository = JsonlEntityRepository(path=entities_path)
     claims = claim_repository.list_claims(source_id=source_id)
@@ -58,6 +67,7 @@ def scaffold_graph_artifacts(
         "entities_input_rows": _count_jsonl_rows(entities_path),
         "nodes": len(materialized.nodes),
         "edges": len(materialized.edges),
+        "anomaly_count": validation_report.anomaly_count,
         **materialized.stats,
     }
     artifact = GraphArtifact(
@@ -81,19 +91,27 @@ def scaffold_graph_artifacts(
         output_directory=str(run_directory),
         latest_directory=str(latest_directory),
         thresholds=thresholds,
+        max_anomalies=max_anomalies,
+        anomaly_count=validation_report.anomaly_count,
+        exit_code=1 if validation_report.anomaly_count > max_anomalies else 0,
         stats=filtered_artifact.stats,
     )
 
     sink.write_full_graph(artifact=artifact)
     sink.write_filtered_graph(artifact=filtered_artifact)
     sink.write_summary(summary=summary)
-    _write_placeholder_artifacts(output_directory=run_directory, generated_at=generated_at)
+    sink.write_anomalies(
+        anomalies=validation_report.anomalies,
+        generated_at=generated_at,
+    )
+    _write_placeholder_html_artifact(output_directory=run_directory)
     _copy_run_artifacts_to_latest(run_directory=run_directory, latest_directory=latest_directory)
 
     return GraphScaffoldResult(
         run_directory=run_directory,
         latest_directory=latest_directory,
         summary=summary,
+        exit_code=summary.exit_code,
     )
 
 
@@ -108,7 +126,10 @@ def _count_jsonl_rows(path: Path) -> int:
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        payload = json.loads(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         if isinstance(payload, dict):
             rows += 1
     return rows
@@ -123,20 +144,8 @@ def _copy_run_artifacts_to_latest(*, run_directory: Path, latest_directory: Path
         shutil.copy2(source_file, latest_directory / source_file.name)
 
 
-def _write_placeholder_artifacts(*, output_directory: Path, generated_at: str) -> None:
-    """Write placeholder anomalies and HTML artifacts for scaffold output."""
-    anomalies_path = output_directory / "anomalies.json"
-    anomalies_payload = {
-        "schema_version": GRAPH_SCHEMA_VERSION,
-        "generated_at": generated_at,
-        "anomaly_count": 0,
-        "anomalies": [],
-    }
-    anomalies_path.write_text(
-        json.dumps(anomalies_payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
+def _write_placeholder_html_artifact(*, output_directory: Path) -> None:
+    """Write placeholder HTML artifact for scaffold output."""
     html_path = output_directory / "graph.html"
     html_path.write_text(
         "\n".join(

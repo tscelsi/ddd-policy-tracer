@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 from .contracts import GraphThresholds
 from .service_layer import GraphScaffoldResult, scaffold_graph_artifacts
+from .validation import validate_required_input_paths
 
 
 def run(
@@ -20,11 +20,14 @@ def run(
     claim_confidence_min: float = 0.6,
     entity_confidence_min: float = 0.7,
     source_id: str | None = None,
+    max_anomalies: int = 0,
 ) -> GraphScaffoldResult:
     """Run one Stage 5 scaffold execution from explicit input artifacts."""
-    _validate_input_path(path=chunks_path, label="chunks")
-    _validate_input_path(path=claims_path, label="claims")
-    _validate_input_path(path=entities_path, label="entities")
+    validate_required_input_paths(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+    )
     return scaffold_graph_artifacts(
         chunks_path=chunks_path,
         claims_path=claims_path,
@@ -35,27 +38,8 @@ def run(
             entity_confidence_min=entity_confidence_min,
         ),
         source_id=source_id,
+        max_anomalies=max_anomalies,
     )
-
-
-def _validate_input_path(*, path: Path, label: str) -> None:
-    """Validate existence and JSONL row shape for one input path."""
-    if not path.exists():
-        raise ValueError(f"{label} input path does not exist: {path}")
-    if not path.is_file():
-        raise ValueError(f"{label} input path is not a file: {path}")
-
-    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"{label} input has invalid JSON at line {index}: {path}",
-            ) from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"{label} input line {index} is not a JSON object: {path}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -89,6 +73,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional source identifier filter for graph materialization.",
     )
+    parser.add_argument(
+        "--max-anomalies",
+        type=int,
+        default=0,
+        help="Maximum allowed anomalies before returning non-zero exit code.",
+    )
     return parser
 
 
@@ -104,6 +94,7 @@ def main() -> int:
         claim_confidence_min=args.claim_confidence_min,
         entity_confidence_min=args.entity_confidence_min,
         source_id=args.source,
+        max_anomalies=args.max_anomalies,
     )
     sys.stdout.write(
         " ".join(
@@ -115,7 +106,7 @@ def main() -> int:
         )
         + "\n",
     )
-    return 0
+    return result.exit_code
 
 
 if __name__ == "__main__":

@@ -71,22 +71,10 @@ class JsonlClaimRepository(ClaimRepository):
         """Load claims from JSONL and optionally filter by source ID."""
         claims: list[ClaimRecord] = []
         for payload in _read_json_objects(self._path):
-            record = ClaimRecord(
-                claim_id=str(payload["claim_id"]),
-                chunk_id=str(payload["chunk_id"]),
-                source_id=str(payload["source_id"]),
-                source_document_id=str(payload["source_document_id"]),
-                document_checksum=str(payload["document_checksum"]),
-                start_char=int(payload["start_char"]),
-                end_char=int(payload["end_char"]),
-                evidence_text=str(payload["evidence_text"]),
-                normalized_claim_text=str(payload["normalized_claim_text"]),
-                confidence=float(payload["confidence"]),
-                claim_type=payload["claim_type"]
-                if payload["claim_type"] is None
-                else str(payload["claim_type"]),
-                extractor_version=str(payload["extractor_version"]),
-            )
+            try:
+                record = _payload_to_claim(payload)
+            except ValueError:
+                continue
             if source_id is not None and record.source_id != source_id:
                 continue
             claims.append(record)
@@ -104,23 +92,10 @@ class JsonlEntityRepository(EntityRepository):
         """Load entities from JSONL and optionally filter by source ID."""
         entities: list[EntityRecord] = []
         for payload in _read_json_objects(self._path):
-            record = EntityRecord(
-                entity_id=str(payload["entity_id"]),
-                chunk_id=str(payload["chunk_id"]),
-                source_id=str(payload["source_id"]),
-                source_document_id=str(payload["source_document_id"]),
-                document_checksum=str(payload["document_checksum"]),
-                start_char=int(payload["start_char"]),
-                end_char=int(payload["end_char"]),
-                mention_text=str(payload["mention_text"]),
-                normalized_mention_text=str(payload["normalized_mention_text"]),
-                entity_type=str(payload["entity_type"]),
-                confidence=float(payload["confidence"]),
-                extractor_version=str(payload["extractor_version"]),
-                canonical_entity_key=payload.get("canonical_entity_key")
-                if payload.get("canonical_entity_key") is None
-                else str(payload.get("canonical_entity_key")),
-            )
+            try:
+                record = _payload_to_entity(payload)
+            except ValueError:
+                continue
             if source_id is not None and record.source_id != source_id:
                 continue
             entities.append(record)
@@ -137,3 +112,84 @@ def _read_json_objects(path: Path) -> list[dict[str, object]]:
         if isinstance(payload, dict):
             rows.append(payload)
     return rows
+
+
+def _payload_to_claim(payload: dict[str, object]) -> ClaimRecord:
+    """Translate one JSON object payload into a claim record."""
+    _require_fields(
+        payload=payload,
+        required_fields=(
+            "claim_id",
+            "chunk_id",
+            "source_id",
+            "source_document_id",
+            "document_checksum",
+            "start_char",
+            "end_char",
+            "evidence_text",
+            "normalized_claim_text",
+            "confidence",
+            "extractor_version",
+        ),
+    )
+    claim_type_value = payload.get("claim_type")
+    claim_type = claim_type_value if claim_type_value is None else str(claim_type_value)
+    return ClaimRecord(
+        claim_id=str(payload["claim_id"]),
+        chunk_id=str(payload["chunk_id"]),
+        source_id=str(payload["source_id"]),
+        source_document_id=str(payload["source_document_id"]),
+        document_checksum=str(payload["document_checksum"]),
+        start_char=int(payload["start_char"]),
+        end_char=int(payload["end_char"]),
+        evidence_text=str(payload["evidence_text"]),
+        normalized_claim_text=str(payload["normalized_claim_text"]),
+        confidence=float(payload["confidence"]),
+        claim_type=claim_type,
+        extractor_version=str(payload["extractor_version"]),
+    )
+
+
+def _payload_to_entity(payload: dict[str, object]) -> EntityRecord:
+    """Translate one JSON object payload into an entity record."""
+    _require_fields(
+        payload=payload,
+        required_fields=(
+            "entity_id",
+            "chunk_id",
+            "source_id",
+            "source_document_id",
+            "document_checksum",
+            "start_char",
+            "end_char",
+            "mention_text",
+            "normalized_mention_text",
+            "entity_type",
+            "confidence",
+            "extractor_version",
+        ),
+    )
+    canonical_key = payload.get("canonical_entity_key")
+    return EntityRecord(
+        entity_id=str(payload["entity_id"]),
+        chunk_id=str(payload["chunk_id"]),
+        source_id=str(payload["source_id"]),
+        source_document_id=str(payload["source_document_id"]),
+        document_checksum=str(payload["document_checksum"]),
+        start_char=int(payload["start_char"]),
+        end_char=int(payload["end_char"]),
+        mention_text=str(payload["mention_text"]),
+        normalized_mention_text=str(payload["normalized_mention_text"]),
+        entity_type=str(payload["entity_type"]),
+        confidence=float(payload["confidence"]),
+        extractor_version=str(payload["extractor_version"]),
+        canonical_entity_key=canonical_key if canonical_key is None else str(canonical_key),
+    )
+
+
+def _require_fields(*, payload: dict[str, object], required_fields: tuple[str, ...]) -> None:
+    """Raise ValueError when one JSON payload misses required keys."""
+    missing = [field for field in required_fields if field not in payload]
+    if missing:
+        missing_fields = ", ".join(sorted(missing))
+        raise ValueError(f"missing required fields: {missing_fields}")

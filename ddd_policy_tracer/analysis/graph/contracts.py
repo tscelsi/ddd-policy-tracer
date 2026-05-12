@@ -59,4 +59,7 @@ class GraphSummary:
     output_directory: str
     latest_directory: str
     thresholds: GraphThresholds
+    max_anomalies: int
+    anomaly_count: int
+    exit_code: int
     stats: dict[str, int]

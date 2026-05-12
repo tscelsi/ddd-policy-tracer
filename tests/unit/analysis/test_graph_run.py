@@ -170,6 +170,40 @@ def test_run_raises_for_missing_required_input(tmp_path: Path) -> None:
         )
 
 
+def test_run_raises_for_non_file_input_path(tmp_path: Path) -> None:
+    """Reject run execution when one required input path is not a file."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims_dir"
+    entities_path = tmp_path / "entities.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(
+        chunks_path,
+        [_claim_row(claim_id="claim-1", chunk_id="chunk-1", source_id="australia_institute")],
+    )
+    claims_path.mkdir(parents=True)
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="ORG",
+            ),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="claims input path is not a file"):
+        run(
+            chunks_path=chunks_path,
+            claims_path=claims_path,
+            entities_path=entities_path,
+            output_root=output_root,
+        )
+
+
 def test_run_materializes_publisher_and_claim_graph_nodes(tmp_path: Path) -> None:
     """Build publisher and claim graph artifacts from claim JSONL records."""
     chunks_path = tmp_path / "chunks.jsonl"
@@ -483,3 +517,117 @@ def test_run_applies_override_thresholds_to_filtered_graph(tmp_path: Path) -> No
         if node["type"] == "Claim"
     }
     assert filtered_claim_ids == {"claim-1", "claim-2"}
+
+
+def test_run_writes_anomaly_report_and_nonzero_exit_when_threshold_exceeded(
+    tmp_path: Path,
+) -> None:
+    """Persist anomalies and return non-zero exit when count exceeds limit."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
+    _write_jsonl(
+        claims_path,
+        [
+            {
+                **_claim_row(
+                    claim_id="claim-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                ),
+            },
+            {
+                "claim_id": "claim-missing-fields",
+                "chunk_id": "chunk-1",
+            },
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="normalized",
+                normalized_mention_text="normalized",
+                entity_type="ORG",
+            ),
+            {
+                "entity_id": "entity-orphan",
+                "chunk_id": "chunk-missing",
+                "source_id": "australia_institute",
+                "source_document_id": "https://example.org/entity-orphan",
+                "document_checksum": "checksum-entity-orphan",
+                "start_char": 0,
+                "end_char": 5,
+                "mention_text": "ghost",
+                "normalized_mention_text": "ghost",
+                "entity_type": "ORG",
+                "confidence": 0.9,
+                "extractor_version": "rules-v1",
+                "canonical_entity_key": None,
+            },
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+        max_anomalies=0,
+    )
+
+    assert result.exit_code == 1
+    anomalies_payload = json.loads(
+        (result.run_directory / "anomalies.json").read_text(encoding="utf-8"),
+    )
+    assert anomalies_payload["anomaly_count"] >= 2
+    assert "missing_claim_fields" in anomalies_payload["categories"]
+    assert "orphan_entity_chunk" in anomalies_payload["categories"]
+
+
+def test_run_returns_zero_exit_when_anomalies_within_limit(tmp_path: Path) -> None:
+    """Allow run success when anomaly count does not exceed max_anomalies."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
+    _write_jsonl(
+        claims_path,
+        [
+            _claim_row(
+                claim_id="claim-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+            ),
+            {"claim_id": "claim-missing", "chunk_id": "chunk-1"},
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="ORG",
+            ),
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+        max_anomalies=10,
+    )
+
+    assert result.exit_code == 0
