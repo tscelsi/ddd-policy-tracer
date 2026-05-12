@@ -16,8 +16,8 @@ from .contracts import (
     GraphSummary,
     GraphThresholds,
 )
-from .materializer import materialize_publisher_claim_graph
-from .repositories import JsonlClaimRepository
+from .materializer import materialize_graph_with_entities
+from .repositories import JsonlClaimRepository, JsonlEntityRepository
 from .sinks import GraphSink, JsonArtifactSink
 
 
@@ -46,8 +46,10 @@ def scaffold_graph_artifacts(
 
     generated_at = utc_now_isoformat()
     claim_repository = JsonlClaimRepository(path=claims_path)
+    entity_repository = JsonlEntityRepository(path=entities_path)
     claims = claim_repository.list_claims(source_id=source_id)
-    materialized = materialize_publisher_claim_graph(claims=claims)
+    entities = entity_repository.list_entities(source_id=source_id)
+    materialized = materialize_graph_with_entities(claims=claims, entities=entities)
 
     stats = {
         "chunks_input_rows": _count_jsonl_rows(chunks_path),

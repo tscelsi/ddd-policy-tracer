@@ -36,6 +36,33 @@ def _claim_row(*, claim_id: str, chunk_id: str, source_id: str) -> dict[str, obj
     }
 
 
+def _entity_row(
+    *,
+    entity_id: str,
+    chunk_id: str,
+    source_id: str,
+    mention_text: str,
+    normalized_mention_text: str,
+    entity_type: str,
+) -> dict[str, object]:
+    """Build one valid entity JSON row for graph run fixture inputs."""
+    return {
+        "entity_id": entity_id,
+        "chunk_id": chunk_id,
+        "source_id": source_id,
+        "source_document_id": f"https://example.org/{entity_id}",
+        "document_checksum": f"checksum-{entity_id}",
+        "start_char": 0,
+        "end_char": len(mention_text),
+        "mention_text": mention_text,
+        "normalized_mention_text": normalized_mention_text,
+        "entity_type": entity_type,
+        "confidence": 0.9,
+        "extractor_version": "rules-v1",
+        "canonical_entity_key": None,
+    }
+
+
 def test_run_writes_timestamped_and_latest_artifacts(tmp_path: Path) -> None:
     """Generate scaffold artifacts under run and latest directories."""
     chunks_path = tmp_path / "chunks.jsonl"
@@ -47,7 +74,19 @@ def test_run_writes_timestamped_and_latest_artifacts(tmp_path: Path) -> None:
         claims_path,
         [_claim_row(claim_id="claim-1", chunk_id="chunk-1", source_id="australia_institute")],
     )
-    _write_jsonl(entities_path, [{"entity_id": "entity-1"}])
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="Institute",
+                normalized_mention_text="institute",
+                entity_type="ORG",
+            ),
+        ],
+    )
 
     result = run(
         chunks_path=chunks_path,
@@ -80,7 +119,19 @@ def test_run_summary_includes_schema_and_input_paths(tmp_path: Path) -> None:
         claims_path,
         [_claim_row(claim_id="claim-1", chunk_id="chunk-1", source_id="australia_institute")],
     )
-    _write_jsonl(entities_path, [{"entity_id": "entity-1"}])
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="Institute",
+                normalized_mention_text="institute",
+                entity_type="ORG",
+            ),
+        ],
+    )
 
     result = run(
         chunks_path=chunks_path,
@@ -138,7 +189,19 @@ def test_run_materializes_publisher_and_claim_graph_nodes(tmp_path: Path) -> Non
             },
         ],
     )
-    _write_jsonl(entities_path, [{"entity_id": "entity-1"}])
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="ORG",
+            ),
+        ],
+    )
 
     result = run(
         chunks_path=chunks_path,
@@ -152,10 +215,12 @@ def test_run_materializes_publisher_and_claim_graph_nodes(tmp_path: Path) -> Non
     edge_types = {edge["type"] for edge in graph_payload["edges"]}
     assert "PublisherOrganization" in node_types
     assert "Claim" in node_types
-    assert edge_types == {"RAISED"}
+    assert edge_types == {"MENTIONS", "RAISED"}
     assert graph_payload["stats"]["publisher_nodes"] == 1
     assert graph_payload["stats"]["claim_nodes"] == 1
     assert graph_payload["stats"]["raised_edges"] == 1
+    assert graph_payload["stats"]["mentioned_entity_nodes"] == 1
+    assert graph_payload["stats"]["mentions_edges"] == 1
 
 
 def test_run_source_filter_limits_materialized_claims(tmp_path: Path) -> None:
@@ -184,7 +249,27 @@ def test_run_source_filter_limits_materialized_claims(tmp_path: Path) -> None:
             },
         ],
     )
-    _write_jsonl(entities_path, [{"entity_id": "entity-1"}])
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="ORG",
+            ),
+            _entity_row(
+                entity_id="entity-2",
+                chunk_id="chunk-2",
+                source_id="lowy_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="ORG",
+            ),
+        ],
+    )
 
     result = run(
         chunks_path=chunks_path,
@@ -200,5 +285,52 @@ def test_run_source_filter_limits_materialized_claims(tmp_path: Path) -> None:
     graph_payload = json.loads(graph_path.read_text(encoding="utf-8"))
     assert summary_payload["inputs"]["source_id_filter"] == "australia_institute"
     claim_nodes = [node for node in graph_payload["nodes"] if node["type"] == "Claim"]
+    entity_nodes = [node for node in graph_payload["nodes"] if node["type"] == "MentionedEntity"]
     assert len(claim_nodes) == 1
+    assert len(entity_nodes) == 1
     assert claim_nodes[0]["properties"]["source_id"] == "australia_institute"
+
+
+def test_run_uses_type_sensitive_entity_dedup_key(tmp_path: Path) -> None:
+    """Keep distinct entity nodes when same text appears under different types."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
+    _write_jsonl(
+        claims_path,
+        [_claim_row(claim_id="claim-1", chunk_id="chunk-1", source_id="australia_institute")],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-1",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="ORG",
+            ),
+            _entity_row(
+                entity_id="entity-2",
+                chunk_id="chunk-1",
+                source_id="australia_institute",
+                mention_text="claim",
+                normalized_mention_text="claim",
+                entity_type="PROGRAM",
+            ),
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+    )
+
+    graph_payload = json.loads((result.run_directory / "graph.json").read_text(encoding="utf-8"))
+    entity_nodes = [node for node in graph_payload["nodes"] if node["type"] == "MentionedEntity"]
+    assert len(entity_nodes) == 2

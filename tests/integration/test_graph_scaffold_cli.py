@@ -34,6 +34,30 @@ def _claim_row(*, claim_id: str, chunk_id: str, source_id: str) -> dict[str, obj
     }
 
 
+def _entity_row(
+    *,
+    entity_id: str,
+    chunk_id: str,
+    source_id: str,
+) -> dict[str, object]:
+    """Build one valid entity row for graph CLI integration tests."""
+    return {
+        "entity_id": entity_id,
+        "chunk_id": chunk_id,
+        "source_id": source_id,
+        "source_document_id": f"https://example.org/{entity_id}",
+        "document_checksum": f"checksum-{entity_id}",
+        "start_char": 0,
+        "end_char": 6,
+        "mention_text": "claim",
+        "normalized_mention_text": "claim",
+        "entity_type": "ORG",
+        "confidence": 0.9,
+        "extractor_version": "rules-v1",
+        "canonical_entity_key": None,
+    }
+
+
 def test_graph_scaffold_script_writes_required_artifacts(tmp_path: Path) -> None:
     """Run graph scaffold script and verify required artifact set."""
     chunks_path = tmp_path / "chunks.jsonl"
@@ -45,7 +69,10 @@ def test_graph_scaffold_script_writes_required_artifacts(tmp_path: Path) -> None
         claims_path,
         [_claim_row(claim_id="claim-1", chunk_id="chunk-1", source_id="australia_institute")],
     )
-    _write_jsonl(entities_path, [{"entity_id": "entity-1"}])
+    _write_jsonl(
+        entities_path,
+        [_entity_row(entity_id="entity-1", chunk_id="chunk-1", source_id="australia_institute")],
+    )
 
     uv_executable = shutil.which("uv")
     if uv_executable is None:

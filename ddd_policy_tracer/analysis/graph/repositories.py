@@ -25,6 +25,33 @@ class ClaimRecord:
     extractor_version: str
 
 
+@dataclass(frozen=True)
+class EntityRecord:
+    """Represent one persisted entity row consumed by graph materialization."""
+
+    entity_id: str
+    chunk_id: str
+    source_id: str
+    source_document_id: str
+    document_checksum: str
+    start_char: int
+    end_char: int
+    mention_text: str
+    normalized_mention_text: str
+    entity_type: str
+    confidence: float
+    extractor_version: str
+    canonical_entity_key: str | None
+
+
+class EntityRepository:
+    """Define entity-read behavior required by graph materialization."""
+
+    def list_entities(self, *, source_id: str | None = None) -> list[EntityRecord]:
+        """Load persisted entity rows, optionally filtered by source."""
+        raise NotImplementedError
+
+
 class ClaimRepository:
     """Define claim-read behavior required by graph materialization."""
 
@@ -64,6 +91,40 @@ class JsonlClaimRepository(ClaimRepository):
                 continue
             claims.append(record)
         return claims
+
+
+class JsonlEntityRepository(EntityRepository):
+    """Load entity rows from append-only JSONL persistence state."""
+
+    def __init__(self, *, path: Path) -> None:
+        """Bind entity repository to one JSONL artifact path."""
+        self._path = path
+
+    def list_entities(self, *, source_id: str | None = None) -> list[EntityRecord]:
+        """Load entities from JSONL and optionally filter by source ID."""
+        entities: list[EntityRecord] = []
+        for payload in _read_json_objects(self._path):
+            record = EntityRecord(
+                entity_id=str(payload["entity_id"]),
+                chunk_id=str(payload["chunk_id"]),
+                source_id=str(payload["source_id"]),
+                source_document_id=str(payload["source_document_id"]),
+                document_checksum=str(payload["document_checksum"]),
+                start_char=int(payload["start_char"]),
+                end_char=int(payload["end_char"]),
+                mention_text=str(payload["mention_text"]),
+                normalized_mention_text=str(payload["normalized_mention_text"]),
+                entity_type=str(payload["entity_type"]),
+                confidence=float(payload["confidence"]),
+                extractor_version=str(payload["extractor_version"]),
+                canonical_entity_key=payload.get("canonical_entity_key")
+                if payload.get("canonical_entity_key") is None
+                else str(payload.get("canonical_entity_key")),
+            )
+            if source_id is not None and record.source_id != source_id:
+                continue
+            entities.append(record)
+        return entities
 
 
 def _read_json_objects(path: Path) -> list[dict[str, object]]:
