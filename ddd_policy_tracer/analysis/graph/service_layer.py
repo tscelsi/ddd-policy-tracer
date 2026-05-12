@@ -105,8 +105,9 @@ def scaffold_graph_artifacts(
         anomalies=validation_report.anomalies,
         generated_at=generated_at,
     )
-    render_graph_html(output_directory=run_directory)
+    render_graph_html(output_directory=run_directory, filtered_artifact=filtered_artifact)
     _copy_run_artifacts_to_latest(run_directory=run_directory, latest_directory=latest_directory)
+    _prune_old_run_directories(output_root=output_root, keep_latest=5)
 
     return GraphScaffoldResult(
         run_directory=run_directory,
@@ -144,3 +145,23 @@ def _copy_run_artifacts_to_latest(*, run_directory: Path, latest_directory: Path
             continue
         shutil.copy2(source_file, latest_directory / source_file.name)
 
+
+def _prune_old_run_directories(*, output_root: Path, keep_latest: int) -> None:
+    """Keep only the newest run directories and delete older graph runs."""
+    if keep_latest < 1:
+        return
+
+    if not output_root.exists():
+        return
+
+    run_directories = sorted(
+        [
+            entry
+            for entry in output_root.iterdir()
+            if entry.is_dir() and entry.name != "latest"
+        ],
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for stale_directory in run_directories[keep_latest:]:
+        shutil.rmtree(stale_directory)

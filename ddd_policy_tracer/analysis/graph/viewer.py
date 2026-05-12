@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from pathlib import Path
+
+from .contracts import GraphArtifact
 
 _GRAPH_HTML = """<!doctype html>
 <html lang=\"en\">
@@ -38,6 +42,7 @@ _GRAPH_HTML = """<!doctype html>
         background: var(--panel);
         padding: 16px;
         overflow: auto;
+        overflow-x: hidden;
       }
       h1 {
         margin: 0 0 8px;
@@ -65,6 +70,47 @@ _GRAPH_HTML = """<!doctype html>
         word-break: break-word;
         font-size: 0.8rem;
         color: var(--muted);
+      }
+      .selection-empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .selection-grid {
+        display: grid;
+        gap: 10px;
+      }
+      .selection-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        background: #fffdf8;
+      }
+      .selection-title {
+        margin: 0 0 6px;
+        font-size: 0.9rem;
+      }
+      .selection-kv {
+        margin: 0;
+        display: grid;
+        grid-template-columns: 88px 1fr;
+        gap: 4px 8px;
+        font-size: 0.8rem;
+      }
+      .selection-kv dd {
+        margin: 0;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .selection-k {
+        color: var(--muted);
+      }
+      .selection-json {
+        margin-top: 8px;
+        font-size: 0.75rem;
+        max-height: 260px;
+        max-width: 100%;
+        overflow: auto;
+        overflow-wrap: anywhere;
       }
       @media (max-width: 900px) {
         .layout {
@@ -103,7 +149,7 @@ _GRAPH_HTML = """<!doctype html>
           </div>
         </div>
         <h2 style=\"font-size:1rem;margin-top:12px\">Selection</h2>
-        <pre id=\"details\">Click a node or edge to inspect properties.</pre>
+        <div id=\"details\" class=\"selection-empty\">Click a node or edge to inspect details.</div>
       </aside>
     </div>
     <script>
@@ -126,9 +172,38 @@ _GRAPH_HTML = """<!doctype html>
         return '#566573'
       }
 
-      fetch('graph.filtered.json')
-        .then((response) => response.json())
-        .then((payload) => {
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;')
+      }
+
+      function renderSelection(data, kind) {
+        const details = document.getElementById('details')
+        const properties = data.properties || {}
+        const propertiesJson = JSON.stringify(properties, null, 2)
+        details.className = 'selection-grid'
+        details.innerHTML = `
+          <section class="selection-card">
+            <h3 class="selection-title">${escapeHtml(kind)} Summary</h3>
+            <dl class="selection-kv">
+              <dt class="selection-k">id</dt><dd>${escapeHtml(data.id || '')}</dd>
+              <dt class="selection-k">type</dt><dd>${escapeHtml(data.type || '')}</dd>
+              <dt class="selection-k">label</dt><dd>${escapeHtml(data.label || '')}</dd>
+            </dl>
+          </section>
+          <section class="selection-card">
+            <h3 class="selection-title">Properties</h3>
+            <pre class="selection-json">${escapeHtml(propertiesJson)}</pre>
+          </section>
+        `
+      }
+
+      const payload = __EMBEDDED_GRAPH_PAYLOAD__
+      try {
           const elements = []
           for (const node of payload.nodes) {
             elements.push({ data: node })
@@ -140,13 +215,24 @@ _GRAPH_HTML = """<!doctype html>
           const cy = cytoscape({
             container: document.getElementById('graph'),
             elements,
-            layout: { name: 'cose', animate: false, fit: true, padding: 30 },
+            layout: {
+              name: 'cose',
+              animate: false,
+              fit: true,
+              padding: 40,
+              avoidOverlap: true,
+              nodeRepulsion: 120000,
+              idealEdgeLength: 130,
+              edgeElasticity: 120,
+              gravity: 0.2,
+              numIter: 1400,
+            },
             style: [
               {
                 selector: 'node',
                 style: {
                   'background-color': (ele) => nodeColor(ele),
-                  label: 'data(label)',
+                  label: '',
                   color: '#202020',
                   'font-size': 10,
                   'text-wrap': 'wrap',
@@ -176,22 +262,37 @@ _GRAPH_HTML = """<!doctype html>
             ],
           })
 
-          const details = document.getElementById('details')
-          cy.on('tap', 'node, edge', (event) => {
-            const data = event.target.data()
-            details.textContent = JSON.stringify(data, null, 2)
+          cy.on('tap', 'node', (event) => {
+            renderSelection(event.target.data(), 'Node')
           })
-        })
-        .catch((error) => {
-          const details = document.getElementById('details')
-          details.textContent = 'Failed to load graph.filtered.json: ' + String(error)
-        })
+
+          cy.on('tap', 'edge', (event) => {
+            renderSelection(event.target.data(), 'Edge')
+          })
+
+          cy.on('mouseover', 'node', (event) => {
+            const node = event.target
+            node.style('label', node.data('label') || '')
+          })
+
+          cy.on('mouseout', 'node', (event) => {
+            event.target.style('label', '')
+          })
+      } catch (error) {
+        const details = document.getElementById('details')
+        details.textContent = 'Failed to render embedded graph data: ' + String(error)
+      }
     </script>
   </body>
 </html>
 """
 
 
-def render_graph_html(*, output_directory: Path) -> None:
-    """Render an interactive static viewer that loads graph.filtered.json."""
-    (output_directory / "graph.html").write_text(_GRAPH_HTML, encoding="utf-8")
+def render_graph_html(*, output_directory: Path, filtered_artifact: GraphArtifact) -> None:
+    """Render an interactive static viewer with embedded filtered graph data."""
+    embedded_payload = json.dumps(asdict(filtered_artifact), ensure_ascii=True)
+    html = _GRAPH_HTML.replace(
+        "__EMBEDDED_GRAPH_PAYLOAD__",
+        embedded_payload,
+    )
+    (output_directory / "graph.html").write_text(html, encoding="utf-8")

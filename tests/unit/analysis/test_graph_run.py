@@ -673,5 +673,5 @@ def test_run_graph_html_references_cytoscape_and_filtered_graph(tmp_path: Path) 
 
     html = (result.run_directory / "graph.html").read_text(encoding="utf-8")
     assert "cytoscape" in html
-    assert "graph.filtered.json" in html
+    assert "const payload = {" in html
     assert "Selection" in html
