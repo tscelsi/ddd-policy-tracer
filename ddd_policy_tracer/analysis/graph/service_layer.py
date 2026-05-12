@@ -16,6 +16,8 @@ from .contracts import (
     GraphSummary,
     GraphThresholds,
 )
+from .materializer import materialize_publisher_claim_graph
+from .repositories import JsonlClaimRepository
 from .sinks import GraphSink, JsonArtifactSink
 
 
@@ -35,6 +37,7 @@ def scaffold_graph_artifacts(
     entities_path: Path,
     output_root: Path,
     thresholds: GraphThresholds,
+    source_id: str | None = None,
 ) -> GraphScaffoldResult:
     """Write Stage 5 graph scaffold artifacts for one execution."""
     run_directory = output_root / _build_run_directory_name()
@@ -42,20 +45,25 @@ def scaffold_graph_artifacts(
     sink: GraphSink = JsonArtifactSink(output_dir=run_directory)
 
     generated_at = utc_now_isoformat()
+    claim_repository = JsonlClaimRepository(path=claims_path)
+    claims = claim_repository.list_claims(source_id=source_id)
+    materialized = materialize_publisher_claim_graph(claims=claims)
+
     stats = {
         "chunks_input_rows": _count_jsonl_rows(chunks_path),
         "claims_input_rows": _count_jsonl_rows(claims_path),
         "entities_input_rows": _count_jsonl_rows(entities_path),
-        "nodes": 0,
-        "edges": 0,
+        "nodes": len(materialized.nodes),
+        "edges": len(materialized.edges),
+        **materialized.stats,
     }
     artifact = GraphArtifact(
         schema_version=GRAPH_SCHEMA_VERSION,
         generated_at=generated_at,
         thresholds=thresholds,
         stats=stats,
-        nodes=[],
-        edges=[],
+        nodes=materialized.nodes,
+        edges=materialized.edges,
     )
     summary = GraphSummary(
         schema_version=GRAPH_SCHEMA_VERSION,
@@ -64,6 +72,7 @@ def scaffold_graph_artifacts(
             "chunks_path": str(chunks_path),
             "claims_path": str(claims_path),
             "entities_path": str(entities_path),
+            "source_id_filter": source_id or "",
         },
         output_directory=str(run_directory),
         latest_directory=str(latest_directory),

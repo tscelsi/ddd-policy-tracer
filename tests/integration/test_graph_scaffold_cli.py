@@ -16,6 +16,24 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=True) + "\n")
 
 
+def _claim_row(*, claim_id: str, chunk_id: str, source_id: str) -> dict[str, object]:
+    """Build one valid claim row for graph CLI integration tests."""
+    return {
+        "claim_id": claim_id,
+        "chunk_id": chunk_id,
+        "source_id": source_id,
+        "source_document_id": f"https://example.org/{claim_id}",
+        "document_checksum": f"checksum-{claim_id}",
+        "start_char": 0,
+        "end_char": 10,
+        "evidence_text": "evidence",
+        "normalized_claim_text": claim_id,
+        "confidence": 0.9,
+        "claim_type": "descriptive",
+        "extractor_version": "rules-v1",
+    }
+
+
 def test_graph_scaffold_script_writes_required_artifacts(tmp_path: Path) -> None:
     """Run graph scaffold script and verify required artifact set."""
     chunks_path = tmp_path / "chunks.jsonl"
@@ -23,7 +41,10 @@ def test_graph_scaffold_script_writes_required_artifacts(tmp_path: Path) -> None
     entities_path = tmp_path / "entities.jsonl"
     output_root = tmp_path / "graph_runs"
     _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
-    _write_jsonl(claims_path, [{"claim_id": "claim-1"}])
+    _write_jsonl(
+        claims_path,
+        [_claim_row(claim_id="claim-1", chunk_id="chunk-1", source_id="australia_institute")],
+    )
     _write_jsonl(entities_path, [{"entity_id": "entity-1"}])
 
     uv_executable = shutil.which("uv")

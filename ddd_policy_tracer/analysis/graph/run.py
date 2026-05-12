@@ -19,6 +19,7 @@ def run(
     output_root: Path,
     claim_confidence_min: float = 0.6,
     entity_confidence_min: float = 0.7,
+    source_id: str | None = None,
 ) -> GraphScaffoldResult:
     """Run one Stage 5 scaffold execution from explicit input artifacts."""
     _validate_input_path(path=chunks_path, label="chunks")
@@ -33,6 +34,7 @@ def run(
             claim_confidence_min=claim_confidence_min,
             entity_confidence_min=entity_confidence_min,
         ),
+        source_id=source_id,
     )
 
 
@@ -82,6 +84,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.7,
         help="Minimum entity confidence for filtered graph output metadata.",
     )
+    parser.add_argument(
+        "--source",
+        default=None,
+        help="Optional source identifier filter for graph materialization.",
+    )
     return parser
 
 
@@ -96,6 +103,7 @@ def main() -> int:
         output_root=Path(args.output_root),
         claim_confidence_min=args.claim_confidence_min,
         entity_confidence_min=args.entity_confidence_min,
+        source_id=args.source,
     )
     sys.stdout.write(
         " ".join(
