@@ -8,7 +8,12 @@ from pathlib import Path
 from _pytest.monkeypatch import MonkeyPatch
 
 from ddd_policy_tracer.analysis.entities import RuleBasedSentenceEntityExtractor
-from ddd_policy_tracer.analysis.entities.run import _build_parser, run
+from ddd_policy_tracer.analysis.entities.run import (
+    _build_parser,
+    _configure_logging,
+    run,
+    run_bulk,
+)
 
 
 def _write_chunk_record(*, path: Path, chunk_id: str, chunk_text: str) -> None:
@@ -69,3 +74,55 @@ def test_rule_based_extractor_default_wiring_type() -> None:
     extractor = RuleBasedSentenceEntityExtractor()
 
     assert isinstance(extractor, RuleBasedSentenceEntityExtractor)
+
+
+def test_run_bulk_executes_entities_service_wiring_for_all_chunks(tmp_path: Path) -> None:
+    """Run concrete entities extraction wiring for all chunk identifiers."""
+    chunk_state_path = tmp_path / "chunks.jsonl"
+    entity_state_path = tmp_path / "entities.jsonl"
+    _write_chunk_record(
+        path=chunk_state_path,
+        chunk_id="chunk_1",
+        chunk_text="The Clean Energy Act was discussed by Australia Institute in Queensland.",
+    )
+    _write_chunk_record(
+        path=chunk_state_path,
+        chunk_id="chunk_2",
+        chunk_text="The Climate Program was evaluated by Australia Institute.",
+    )
+
+    reports = run_bulk(
+        chunk_state_path=chunk_state_path,
+        entity_state_path=entity_state_path,
+        extractor_kind="rule",
+        extractor_version="rules-v1",
+    )
+
+    assert len(reports) == 2
+    assert {report.chunk_id for report in reports} == {"chunk_1", "chunk_2"}
+    assert all(report.status == "completed" for report in reports)
+
+
+def test_build_parser_accepts_all_chunks_flag() -> None:
+    """Parse all-chunks mode without requiring one chunk id."""
+    parser = _build_parser()
+
+    args = parser.parse_args(["--all-chunks"])
+
+    assert args.all_chunks is True
+    assert args.chunk_id is None
+
+
+def test_build_parser_defaults_log_level_from_env(monkeypatch: MonkeyPatch) -> None:
+    """Default log level should come from environment when configured."""
+    monkeypatch.setenv("ENTITY_LOG_LEVEL", "INFO")
+
+    parser = _build_parser()
+    args = parser.parse_args(["--chunk-id", "chunk_1"])
+
+    assert args.log_level == "INFO"
+
+
+def test_configure_logging_runs_with_debug_level() -> None:
+    """Configure logging without raising when one valid level is provided."""
+    _configure_logging(log_level="DEBUG")

@@ -73,20 +73,7 @@ class FilesystemClaimRepository(ClaimRepository):
 
         with self._state_path.open("a", encoding="utf-8") as handle:
             for claim in to_insert:
-                record = {
-                    "claim_id": claim.claim_id,
-                    "chunk_id": claim.chunk_id,
-                    "source_id": claim.source_id,
-                    "source_document_id": claim.source_document_id,
-                    "document_checksum": claim.document_checksum,
-                    "start_char": claim.start_char,
-                    "end_char": claim.end_char,
-                    "evidence_text": claim.evidence_text,
-                    "normalized_claim_text": claim.normalized_claim_text,
-                    "confidence": claim.confidence,
-                    "claim_type": claim.claim_type,
-                    "extractor_version": claim.extractor_version,
-                }
+                record = _claim_to_record(claim)
                 handle.write(json.dumps(record, ensure_ascii=True) + "\n")
         return len(to_insert)
 
@@ -108,22 +95,7 @@ class FilesystemClaimRepository(ClaimRepository):
             if not raw_line.strip():
                 continue
             payload = json.loads(raw_line)
-            claims.append(
-                ClaimCandidate(
-                    claim_id=payload["claim_id"],
-                    chunk_id=payload["chunk_id"],
-                    source_id=payload["source_id"],
-                    source_document_id=payload["source_document_id"],
-                    document_checksum=payload["document_checksum"],
-                    start_char=payload["start_char"],
-                    end_char=payload["end_char"],
-                    evidence_text=payload["evidence_text"],
-                    normalized_claim_text=payload["normalized_claim_text"],
-                    confidence=payload["confidence"],
-                    claim_type=payload["claim_type"],
-                    extractor_version=payload["extractor_version"],
-                ),
-            )
+            claims.append(_record_to_claim(payload))
         return claims
 
 
@@ -136,4 +108,40 @@ def _claim_dedup_key(claim: ClaimCandidate) -> tuple[str, str, str, int, int, st
         claim.start_char,
         claim.end_char,
         claim.extractor_version,
+    )
+
+
+def _claim_to_record(claim: ClaimCandidate) -> dict[str, object]:
+    """Translate one claim candidate into JSON-serializable record fields."""
+    return {
+        "claim_id": claim.claim_id,
+        "chunk_id": claim.chunk_id,
+        "source_id": claim.source_id,
+        "source_document_id": claim.source_document_id,
+        "document_checksum": claim.document_checksum,
+        "start_char": claim.start_char,
+        "end_char": claim.end_char,
+        "evidence_text": claim.evidence_text,
+        "normalized_claim_text": claim.normalized_claim_text,
+        "confidence": claim.confidence,
+        "claim_type": claim.claim_type,
+        "extractor_version": claim.extractor_version,
+    }
+
+
+def _record_to_claim(payload: dict[str, object]) -> ClaimCandidate:
+    """Translate one persisted claim record payload into domain object."""
+    return ClaimCandidate(
+        claim_id=str(payload["claim_id"]),
+        chunk_id=str(payload["chunk_id"]),
+        source_id=str(payload["source_id"]),
+        source_document_id=str(payload["source_document_id"]),
+        document_checksum=str(payload["document_checksum"]),
+        start_char=int(payload["start_char"]),
+        end_char=int(payload["end_char"]),
+        evidence_text=str(payload["evidence_text"]),
+        normalized_claim_text=str(payload["normalized_claim_text"]),
+        confidence=float(payload["confidence"]),
+        claim_type=payload["claim_type"] if payload["claim_type"] is None else str(payload["claim_type"]),
+        extractor_version=str(payload["extractor_version"]),
     )

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import joblib
+import spacy
 from sklearn.dummy import DummyClassifier
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -16,6 +17,7 @@ from sklearn.linear_model import LogisticRegression
 from ddd_policy_tracer.analysis.silver_dataset import deterministic_split_records
 
 _TOKEN_RE = re.compile(r"\w+|[^\w\s]", flags=re.UNICODE)
+_NLP = spacy.load("en_core_web_sm")
 
 
 def run(
@@ -176,8 +178,7 @@ def _evaluate(
             )
         }
         gold_spans = {
-            (chunk_id, start_char, end_char)
-            for start_char, end_char in _record_claim_spans(record)
+            (chunk_id, start_char, end_char) for start_char, end_char in _record_claim_spans(record)
         }
         tp += len(predicted_spans.intersection(gold_spans))
         fp += len(predicted_spans - gold_spans)
@@ -207,7 +208,15 @@ def _predict_spans(
     if not tokens:
         return []
 
-    features = [_token_features(tokens=tokens, index=index) for index in range(len(tokens))]
+    spacy_features_by_start = _spacy_token_features(chunk_text)
+    features = [
+        _token_features(
+            tokens=tokens,
+            index=index,
+            spacy_features_by_start=spacy_features_by_start,
+        )
+        for index in range(len(tokens))
+    ]
     vectorizer = model["vectorizer"]
     x_matrix = vectorizer.transform(features)
 
@@ -269,9 +278,14 @@ def _build_token_examples(records: list[dict[str, object]]) -> list[dict[str, ob
         tokens = _tokenize(chunk_text)
         if not tokens:
             continue
+        spacy_features_by_start = _spacy_token_features(chunk_text)
         gold_tags = _gold_bio_tags(tokens=tokens, claim_spans=_record_claim_spans(record))
         for index, (token_text, _, _) in enumerate(tokens):
-            features = _token_features(tokens=tokens, index=index)
+            features = _token_features(
+                tokens=tokens,
+                index=index,
+                spacy_features_by_start=spacy_features_by_start,
+            )
             examples.append(
                 {
                     "token_text": token_text,
@@ -315,28 +329,67 @@ def _tokenize(text: str) -> list[tuple[str, int, int]]:
     return tokens
 
 
+def _spacy_token_features(text: str) -> dict[int, dict[str, object]]:
+    """Build spaCy-derived POS and morphology features by token start offset."""
+    doc = _NLP(text)
+    features_by_start: dict[int, dict[str, object]] = {}
+    for index, token in enumerate(doc):
+        prev_pos = doc[index - 1].pos_ if index > 0 else "<START>"
+        next_pos = doc[index + 1].pos_ if index < len(doc) - 1 else "<END>"
+        prev2_pos = doc[index - 2].pos_ if index > 1 else "<START2>"
+        next2_pos = doc[index + 2].pos_ if index < len(doc) - 2 else "<END2>"
+        features_by_start[token.idx] = {
+            "spacy_pos": token.pos_ or "",
+            "spacy_tag": token.tag_ or "",
+            "spacy_lemma": token.lemma_.casefold() if token.lemma_ else "",
+            "spacy_is_stop": token.is_stop,
+            "spacy_is_alpha": token.is_alpha,
+            "spacy_dep": token.dep_ or "",
+            "spacy_shape": token.shape_ or "",
+            "spacy_morph": str(token.morph) if token.morph else "",
+            "spacy_prev_pos": prev_pos,
+            "spacy_next_pos": next_pos,
+            "spacy_prev2_pos": prev2_pos,
+            "spacy_next2_pos": next2_pos,
+        }
+    return features_by_start
+
+
 def _token_features(
     *,
     tokens: list[tuple[str, int, int]],
     index: int,
+    spacy_features_by_start: dict[int, dict[str, object]],
 ) -> dict[str, object]:
     """Build lightweight contextual token features for one index."""
     token_text = tokens[index][0]
+    token_start = tokens[index][1]
     prev_text = tokens[index - 1][0] if index > 0 else "<START>"
     next_text = tokens[index + 1][0] if index < len(tokens) - 1 else "<END>"
-
-    return {
+    base_features: dict[str, object] = {
         "token": token_text.casefold(),
         "token_is_title": token_text.istitle(),
         "token_is_upper": token_text.isupper(),
         "token_is_digit": token_text.isdigit(),
         "token_has_digit": any(char.isdigit() for char in token_text),
+        "token_has_alpha": any(char.isalpha() for char in token_text),
+        "token_has_hyphen": "-" in token_text,
+        "token_has_currency": "$" in token_text,
         "token_has_percent": "%" in token_text,
+        "token_len": len(token_text),
         "token_prefix_3": token_text[:3].casefold(),
         "token_suffix_3": token_text[-3:].casefold(),
+        "token_prefix_1": token_text[:1].casefold(),
+        "token_suffix_1": token_text[-1:].casefold(),
         "prev_token": prev_text.casefold(),
         "next_token": next_text.casefold(),
+        "prev_token_is_title": prev_text.istitle(),
+        "next_token_is_title": next_text.istitle(),
     }
+    spacy_features = spacy_features_by_start.get(token_start)
+    if spacy_features is not None:
+        base_features.update(spacy_features)
+    return base_features
 
 
 def _positive_class_probabilities(classifier: object, x_matrix: object) -> list[float]:

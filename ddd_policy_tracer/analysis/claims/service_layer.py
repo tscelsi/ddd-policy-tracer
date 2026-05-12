@@ -63,6 +63,13 @@ class ClaimsService:
         )
         return report
 
+    def extract_claims_for_chunks(self, *, chunk_ids: list[str]) -> list[ClaimExtractionReport]:
+        """Extract and persist claims for a batch of chunk identifiers."""
+        reports: list[ClaimExtractionReport] = []
+        for chunk_id in chunk_ids:
+            reports.append(self.extract_claims_for_chunk(chunk_id=chunk_id))
+        return reports
+
     def _publish_failure(
         self,
         *,

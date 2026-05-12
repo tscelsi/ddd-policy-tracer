@@ -18,6 +18,10 @@ class InMemoryChunkRepository:
         """Return one chunk object when present in memory."""
         return self.chunks.get(chunk_id)
 
+    def list_chunk_ids(self) -> list[str]:
+        """Return all chunk ids from in-memory state for bulk extraction."""
+        return list(self.chunks.keys())
+
 
 @dataclass
 class InMemoryEntityRepository:
@@ -29,6 +33,12 @@ class InMemoryEntityRepository:
         """Persist entity mentions and report inserted count."""
         self.persisted.extend(entities)
         return len(entities)
+
+    def list_entities(self, *, chunk_id: str | None = None) -> list[EntityMention]:
+        """List persisted entities, optionally filtered by chunk identifier."""
+        if chunk_id is None:
+            return list(self.persisted)
+        return [entity for entity in self.persisted if entity.chunk_id == chunk_id]
 
 
 class FixedExtractor:
@@ -72,6 +82,13 @@ class FixedExtractor:
         _ = chunk
         return 2
 
+    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
+        """Extract deterministic entities for many chunks in one pass."""
+        entities: list[EntityMention] = []
+        for chunk in chunks:
+            entities.extend(self.extract(chunk=chunk))
+        return entities
+
 
 @dataclass
 class RecordingPublisher:
@@ -96,6 +113,11 @@ class RaisingExtractor:
         """Return zero sentence count for failed extraction path."""
         _ = chunk
         return 0
+
+    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
+        """Raise one extraction failure for bulk extraction path coverage."""
+        _ = chunks
+        raise RuntimeError("extract failed")
 
 
 def _sample_chunk() -> DocumentChunk:
@@ -253,3 +275,70 @@ def test_entities_service_returns_failed_when_extraction_raises() -> None:
         "processed_sentences": 0,
         "entities_by_type": _zero_entity_type_counts(),
     }
+
+
+def test_entities_service_processes_all_chunks_in_repository() -> None:
+    """Extract and persist entities for all available chunk ids."""
+    first = _sample_chunk()
+    second = DocumentChunk(
+        chunk_id="chunk_456",
+        source_id="australia_institute",
+        source_document_id="https://example.org/report-2",
+        document_checksum="checksum-2",
+        chunk_index=1,
+        start_char=0,
+        end_char=37,
+        chunk_text="Queensland Program by Australia Institute.",
+    )
+    publisher = RecordingPublisher(events=[])
+    entity_repo = InMemoryEntityRepository(persisted=[])
+    service = EntitiesService(
+        chunk_repository=InMemoryChunkRepository(
+            chunks={first.chunk_id: first, second.chunk_id: second},
+        ),
+        entity_repository=entity_repo,
+        extractor=FixedExtractor(),
+        event_publisher=publisher,
+    )
+
+    reports = service.extract_entities_for_all_chunks()
+
+    assert len(reports) == 2
+    assert {report.chunk_id for report in reports} == {"chunk_123", "chunk_456"}
+    assert all(report.status == "completed" for report in reports)
+    assert all(report.entities_extracted == 2 for report in reports)
+    assert len(entity_repo.persisted) == 4
+    assert len(publisher.events) == 2
+
+
+def test_entities_service_marks_all_chunks_failed_when_bulk_extraction_raises() -> None:
+    """Publish failed reports for each chunk when extract_many raises error."""
+    first = _sample_chunk()
+    second = DocumentChunk(
+        chunk_id="chunk_456",
+        source_id="australia_institute",
+        source_document_id="https://example.org/report-2",
+        document_checksum="checksum-2",
+        chunk_index=1,
+        start_char=0,
+        end_char=37,
+        chunk_text="Queensland Program by Australia Institute.",
+    )
+    publisher = RecordingPublisher(events=[])
+    entity_repo = InMemoryEntityRepository(persisted=[])
+    service = EntitiesService(
+        chunk_repository=InMemoryChunkRepository(
+            chunks={first.chunk_id: first, second.chunk_id: second},
+        ),
+        entity_repository=entity_repo,
+        extractor=RaisingExtractor(),
+        event_publisher=publisher,
+    )
+
+    reports = service.extract_entities_for_all_chunks()
+
+    assert len(reports) == 2
+    assert all(report.status == "failed" for report in reports)
+    assert all(report.error_message == "extract failed" for report in reports)
+    assert entity_repo.persisted == []
+    assert len(publisher.events) == 2

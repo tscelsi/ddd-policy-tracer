@@ -207,3 +207,26 @@ def test_claims_service_returns_failed_when_extraction_raises() -> None:
         "claims_extracted": 0,
         "processed_sentences": 0,
     }
+
+
+def test_claims_service_processes_bulk_chunk_ids() -> None:
+    """Process many chunk ids and return one report per requested id."""
+    chunk = _sample_chunk()
+    publisher = RecordingPublisher(events=[])
+    claim_repo = InMemoryClaimRepository(persisted=[])
+    service = ClaimsService(
+        chunk_repository=InMemoryChunkRepository(chunks={chunk.chunk_id: chunk}),
+        claim_repository=claim_repo,
+        extractor=FixedExtractor(),
+        event_publisher=publisher,
+    )
+
+    reports = service.extract_claims_for_chunks(chunk_ids=[chunk.chunk_id, "unknown"])
+
+    assert len(reports) == 2
+    assert reports[0].chunk_id == chunk.chunk_id
+    assert reports[0].status == "completed"
+    assert reports[1].chunk_id == "unknown"
+    assert reports[1].status == "failed"
+    assert len(claim_repo.persisted) == 1
+    assert len(publisher.events) == 2

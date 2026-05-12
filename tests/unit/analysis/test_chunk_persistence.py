@@ -10,6 +10,7 @@ from ddd_policy_tracer.analysis.chunks.adapters import (
     FilesystemDocumentChunkRepository,
     SQLiteDocumentChunkRepository,
 )
+from ddd_policy_tracer.analysis.chunks.chunking import SpacyChunker
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 from ddd_policy_tracer.discovery.domain import SourceDocumentVersion
 
@@ -103,18 +104,16 @@ def test_chunk_and_persist_is_idempotent_for_existing_version(
     state_path = tmp_path / "chunks.db"
     version = _sample_version(text="0123456789" * 10)
     config = ChunkingConfig(chunk_size_chars=20, chunk_overlap_chars=5)
-
+    chunker = SpacyChunker(config=config)
     first_report = chunk_and_persist_document_versions(
-        versions=[version],
+        documents=[version],
         state_path=state_path,
-        repository_backend="sqlite",
-        config=config,
+        chunker=chunker,
     )
     second_report = chunk_and_persist_document_versions(
-        versions=[version],
+        documents=[version],
         state_path=state_path,
-        repository_backend="sqlite",
-        config=config,
+        chunker=chunker,
     )
 
     assert first_report.processed_documents == 1
@@ -136,10 +135,9 @@ def test_chunk_and_persist_supports_filesystem_backend(
     version = _sample_version(text="ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
     report = chunk_and_persist_document_versions(
-        versions=[version],
+        documents=[version],
+        chunker=SpacyChunker(ChunkingConfig(chunk_size_chars=10, chunk_overlap_chars=2)),
         state_path=state_path,
-        repository_backend="filesystem",
-        config=ChunkingConfig(chunk_size_chars=10, chunk_overlap_chars=2),
     )
 
     assert report.processed_documents == 1

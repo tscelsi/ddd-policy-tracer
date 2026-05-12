@@ -46,12 +46,8 @@ def test_chunk_cli_persists_chunks_from_filesystem_acquisition_state(
             "australia_institute",
             "--state-path",
             str(acquisition_state_path),
-            "--repository-backend",
-            "filesystem",
             "--chunk-state-path",
             str(chunk_state_path),
-            "--chunk-repository-backend",
-            "filesystem",
             "--chunk-size-chars",
             "10",
             "--chunk-overlap-chars",
@@ -65,5 +61,5 @@ def test_chunk_cli_persists_chunks_from_filesystem_acquisition_state(
     assert "source=australia_institute" in rendered
     assert "processed_documents=1" in rendered
     assert "chunked_documents=1" in rendered
-    assert "persisted_chunks=4" in rendered
+    assert "persisted_chunks=1" in rendered
     assert chunk_state_path.exists()

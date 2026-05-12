@@ -1,7 +1,12 @@
 """Public exports for entities bounded context."""
 
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
-from .extractors import RuleBasedEntityExtractorConfig, RuleBasedSentenceEntityExtractor
+from .extractors import (
+    RuleBasedEntityExtractorConfig,
+    RuleBasedSentenceEntityExtractor,
+    SpacyFastCorefEntityExtractor,
+    SpacyFastCorefEntityExtractorConfig,
+)
 from .models import EntityExtractionReport, EntityMention, EntityType
 from .ports import (
     ChunkRepository,
@@ -24,4 +29,6 @@ __all__ = [
     "FilesystemEntityRepository",
     "RuleBasedEntityExtractorConfig",
     "RuleBasedSentenceEntityExtractor",
+    "SpacyFastCorefEntityExtractor",
+    "SpacyFastCorefEntityExtractorConfig",
 ]

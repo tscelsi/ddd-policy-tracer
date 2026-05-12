@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from typing import Protocol
 
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 
@@ -75,6 +77,7 @@ _SENTENCE_PERSON_STOP_SUFFIX = (
 )
 
 _QUOTE_PAIRS = (("\"", "\""), ("'", "'"), ("\u201c", "\u201d"))
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -134,6 +137,13 @@ class RuleBasedSentenceEntityExtractor(EntityExtractor):
     def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
         """Count sentence units processed from one chunk payload."""
         return len(_split_sentences_with_offsets(chunk.chunk_text))
+
+    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
+        """Extract entity mentions for many chunks with deterministic batching."""
+        entities: list[EntityMention] = []
+        for chunk in chunks:
+            entities.extend(self.extract(chunk=chunk))
+        return entities
 
     def _extract_sentence_candidates(
         self,
@@ -380,6 +390,225 @@ class RuleBasedSentenceEntityExtractor(EntityExtractor):
         return tuple(line.strip() for line in content.splitlines() if line.strip())
 
 
+class SpacyEntityLike(Protocol):
+    """Represent minimal spaCy entity span interface for extraction."""
+
+    start_char: int
+    end_char: int
+    text: str
+    label_: str
+
+
+class SpacySentenceLike(Protocol):
+    """Represent minimal spaCy sentence span interface for counting."""
+
+    text: str
+
+
+class SpacyDocLike(Protocol):
+    """Represent minimal spaCy doc interface consumed by extractor."""
+
+    ents: list[SpacyEntityLike]
+    sents: list[SpacySentenceLike]
+
+
+class SpacyNlpLike(Protocol):
+    """Represent minimal spaCy nlp callable for document parsing."""
+
+    def __call__(self, text: str) -> SpacyDocLike:
+        """Parse one text string and return a spaCy-like document."""
+
+    def pipe(self, texts: list[str]) -> list[SpacyDocLike]:
+        """Parse many text strings and yield spaCy-like documents."""
+
+
+@dataclass(frozen=True)
+class SpacyFastCorefEntityExtractorConfig:
+    """Configure spaCy plus fastcoref entity extraction behavior."""
+
+    extractor_version: str = "spacy-fastcoref-v1"
+    spacy_model: str = "en_core_web_sm"
+    enable_coref: bool = True
+    fallback_to_rule_extractor: bool = True
+
+
+@dataclass(frozen=True)
+class SpacyFastCorefEntityExtractor(EntityExtractor):
+    """Extract entities with spaCy NER and enrich canonical keys via fastcoref."""
+
+    config: SpacyFastCorefEntityExtractorConfig = SpacyFastCorefEntityExtractorConfig()
+    nlp: SpacyNlpLike | None = None
+
+    def extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
+        """Return entity mentions from spaCy labels and optional coreference clusters."""
+        nlp = self.nlp or _build_spacy_fastcoref_nlp(self.config)
+        doc = nlp(chunk.chunk_text)
+        entities = self._extract_from_doc(chunk=chunk, doc=doc)
+        if entities:
+            return entities
+        if self.config.fallback_to_rule_extractor:
+            return self._fallback_rule_extract(chunk=chunk)
+        return []
+
+    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
+        """Return entity mentions for many chunks using spaCy nlp.pipe."""
+        if not chunks:
+            return []
+        nlp = self.nlp or _build_spacy_fastcoref_nlp(self.config)
+        docs = nlp.pipe([chunk.chunk_text for chunk in chunks])
+
+        entities: list[EntityMention] = []
+        for chunk, doc in zip(chunks, docs, strict=False):
+            chunk_entities = self._extract_from_doc(chunk=chunk, doc=doc)
+            if not chunk_entities and self.config.fallback_to_rule_extractor:
+                chunk_entities = self._fallback_rule_extract(chunk=chunk)
+            entities.extend(chunk_entities)
+        return entities
+
+    def _extract_from_doc(self, *, chunk: DocumentChunk, doc: SpacyDocLike) -> list[EntityMention]:
+        """Map one parsed doc into strict v1 entity mention records."""
+        canonical_by_span = _build_coref_canonical_lookup(doc)
+
+        entities: list[EntityMention] = []
+        for entity in doc.ents:
+            entity_type = _map_spacy_entity_type(
+                label=entity.label_,
+                mention_text=entity.text,
+            )
+            if entity_type is None:
+                continue
+
+            mention_text = chunk.chunk_text[entity.start_char : entity.end_char]
+            normalized = _normalize_mention_text(mention_text)
+            canonical_text = canonical_by_span.get((entity.start_char, entity.end_char))
+            canonical_key = (
+                _normalize_mention_text(canonical_text).casefold()
+                if canonical_text is not None and canonical_text.strip()
+                else None
+            )
+
+            entities.append(
+                _build_entity_mention(
+                    chunk=chunk,
+                    start_char=entity.start_char,
+                    end_char=entity.end_char,
+                    mention_text=mention_text,
+                    normalized_mention_text=normalized,
+                    entity_type=entity_type,
+                    confidence=1.0,
+                    extractor_version=self.config.extractor_version,
+                    canonical_entity_key=canonical_key,
+                    metadata={
+                        "spacy_label": entity.label_,
+                        "coref_canonical": canonical_text,
+                    }
+                    if canonical_text is not None
+                    else {"spacy_label": entity.label_},
+                ),
+            )
+        return entities
+
+    def _fallback_rule_extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
+        """Fallback to deterministic rules when spaCy returns no mapped entities."""
+        rule_extractor = RuleBasedSentenceEntityExtractor(
+            config=RuleBasedEntityExtractorConfig(
+                extractor_version=f"{self.config.extractor_version}-fallback-rules",
+            ),
+        )
+        return rule_extractor.extract(chunk=chunk)
+
+    def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
+        """Count sentence units from spaCy parsing for report semantics."""
+        nlp = self.nlp or _build_spacy_fastcoref_nlp(self.config)
+        doc = nlp(chunk.chunk_text)
+        try:
+            return len(list(doc.sents))
+        except Exception:
+            return len(_split_sentences_with_offsets(chunk.chunk_text))
+
+
+def _build_spacy_fastcoref_nlp(config: SpacyFastCorefEntityExtractorConfig) -> SpacyNlpLike:
+    """Build spaCy pipeline and attach fastcoref when configured and available."""
+    import spacy
+
+    try:
+        nlp = spacy.load(config.spacy_model)
+    except OSError:
+        _LOGGER.warning(
+            "spaCy model '%s' not found; falling back to blank 'en' pipeline",
+            config.spacy_model,
+        )
+        nlp = spacy.blank("en")
+        if "sentencizer" not in nlp.pipe_names:
+            nlp.add_pipe("sentencizer")
+
+    if config.enable_coref:
+        try:
+            import fastcoref  # noqa: F401
+
+            if "fastcoref" not in nlp.pipe_names:
+                nlp.add_pipe("fastcoref")
+        except (ImportError, ValueError, AttributeError):
+            _LOGGER.warning(
+                "fastcoref component unavailable; continuing without coreference resolution",
+            )
+            return nlp
+    return nlp
+
+
+def _map_spacy_entity_type(*, label: str, mention_text: str) -> EntityType | None:
+    """Map spaCy label and mention cues to one strict v1 entity type."""
+    lowered = mention_text.casefold()
+    if any(cue in lowered for cue in _POLICY_CUES):
+        return "POLICY"
+    if any(cue in lowered for cue in _PROGRAM_CUES):
+        return "PROGRAM"
+    if label == "ORG":
+        return "ORG"
+    if label == "PERSON":
+        return "PERSON"
+    if label in {"GPE", "LOC", "NORP"}:
+        return "JURISDICTION"
+    return None
+
+
+def _build_coref_canonical_lookup(doc: SpacyDocLike) -> dict[tuple[int, int], str]:
+    """Build mention-span to canonical text lookup from fastcoref clusters."""
+    lookup: dict[tuple[int, int], str] = {}
+    doc_extensions = getattr(doc, "_", None)
+    clusters = getattr(doc_extensions, "coref_clusters", None)
+    if not isinstance(clusters, list):
+        return lookup
+
+    for cluster in clusters:
+        mentions = _coref_mentions(cluster)
+        if not mentions:
+            continue
+        canonical_text = mentions[0][2]
+        for start_char, end_char, _mention_text in mentions:
+            lookup[(start_char, end_char)] = canonical_text
+    return lookup
+
+
+def _coref_mentions(cluster: object) -> list[tuple[int, int, str]]:
+    """Extract span mentions from one fastcoref cluster object."""
+    mentions_obj = getattr(cluster, "mentions", None)
+    if not isinstance(mentions_obj, list):
+        return []
+
+    mentions: list[tuple[int, int, str]] = []
+    for mention in mentions_obj:
+        start_char = getattr(mention, "start_char", None)
+        end_char = getattr(mention, "end_char", None)
+        text = getattr(mention, "text", None)
+        if not isinstance(start_char, int) or not isinstance(end_char, int):
+            continue
+        if not isinstance(text, str) or not text.strip():
+            continue
+        mentions.append((start_char, end_char, text))
+    return mentions
+
+
 def _default_jurisdictions_path() -> Path:
     """Return default in-repo jurisdiction resource path for v1."""
     return Path(__file__).resolve().parent / "resources" / "jurisdictions.txt"
@@ -411,6 +640,8 @@ def _build_entity_mention(
     entity_type: EntityType,
     confidence: float,
     extractor_version: str,
+    canonical_entity_key: str | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> EntityMention:
     """Build one deterministic entity mention domain record."""
     entity_id = _build_entity_id(
@@ -433,6 +664,8 @@ def _build_entity_mention(
         entity_type=entity_type,
         confidence=confidence,
         extractor_version=extractor_version,
+        canonical_entity_key=canonical_entity_key,
+        metadata=metadata,
     )
 
 

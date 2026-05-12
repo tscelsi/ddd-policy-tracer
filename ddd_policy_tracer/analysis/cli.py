@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
+from ddd_policy_tracer.analysis.chunks.chunking import SpacyChunker
 from ddd_policy_tracer.discovery.service_layer import (
     get_source_document_versions,
 )
@@ -68,10 +69,11 @@ def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
         chunk_size_chars=args.chunk_size_chars,
         chunk_overlap_chars=args.chunk_overlap_chars,
     )
+    chunker = SpacyChunker(config=config)
     report = chunk_and_persist_document_versions(
-        versions=versions,
+        documents=versions,
+        chunker=chunker,
         state_path=Path(args.chunk_state_path),
-        config=config,
     )
     stdout.write(
         " ".join(

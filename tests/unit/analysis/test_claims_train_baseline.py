@@ -7,7 +7,7 @@ from pathlib import Path
 
 import joblib
 
-from ddd_policy_tracer.analysis.claims.evaluation.train_baseline import run
+from ddd_policy_tracer.analysis.claims.ml.train_baseline import run
 
 
 def _write_dataset(path: Path) -> None:

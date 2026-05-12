@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from ddd_policy_tracer.analysis.claims.evaluation.build_silver_dataset import run
+from ddd_policy_tracer.analysis.claims.ml.build_silver_dataset import run
 
 
 class StubResponse:

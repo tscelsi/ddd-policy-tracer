@@ -42,6 +42,27 @@ class FilesystemChunkRepository(ChunkRepository):
             )
         return None
 
+    def list_chunk_ids(self) -> list[str]:
+        """Return all unique chunk ids from JSONL in first-seen order."""
+        if not self._state_path.exists():
+            return []
+
+        seen: set[str] = set()
+        chunk_ids: list[str] = []
+        content = self._state_path.read_text(encoding="utf-8")
+        for raw_line in content.splitlines():
+            if not raw_line.strip():
+                continue
+            payload = json.loads(raw_line)
+            chunk_id = payload.get("chunk_id")
+            if not isinstance(chunk_id, str) or not chunk_id.strip():
+                continue
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            chunk_ids.append(chunk_id)
+        return chunk_ids
+
 
 class FilesystemEntityRepository(EntityRepository):
     """Store and retrieve entity mentions from append-only JSONL state."""

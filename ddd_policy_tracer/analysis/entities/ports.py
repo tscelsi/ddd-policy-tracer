@@ -23,6 +23,9 @@ class ChunkRepository(Protocol):
     def get_chunk(self, *, chunk_id: str) -> DocumentChunk | None:
         """Return one chunk for extraction or none when missing."""
 
+    def list_chunk_ids(self) -> list[str]:
+        """Return all unique chunk identifiers available for extraction."""
+
 
 class EntityRepository(Protocol):
     """Persist extracted entity mentions."""
@@ -39,6 +42,9 @@ class EntityExtractor(Protocol):
 
     def extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
         """Return extracted entity mentions for one chunk."""
+
+    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
+        """Return extracted entity mentions for many chunks."""
 
     def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
         """Return number of processed sentences for one chunk."""

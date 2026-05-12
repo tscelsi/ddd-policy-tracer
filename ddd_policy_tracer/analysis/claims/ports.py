@@ -2,19 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 
 from .models import ClaimCandidate
-
-
-@dataclass(frozen=True)
-class ExtractionMetrics:
-    """Represent extractor metrics used by service reporting and events."""
-
-    processed_sentences: int
 
 
 class ChunkRepository(Protocol):

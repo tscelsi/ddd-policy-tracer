@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Protocol
 
 import spacy
 
@@ -24,66 +25,87 @@ class _SentenceSpan:
     end_char: int
 
 
-def chunk_document_version(
-    *,
-    version: SourceDocumentVersion,
-    config: ChunkingConfig | None = None,
-) -> list[DocumentChunk]:
-    """Split one document version into stable sentence-based chunks."""
-    active_config = config or ChunkingConfig()
-    _validate_chunking_config(active_config)
+class Chunker(Protocol):
+    """Chunk one source document version into text spans for claim extraction."""
 
-    normalized_text = version.normalized_text.strip()
-    if not normalized_text:
-        return []
+    def __init__(self, config: ChunkingConfig | None = None) -> None:
+        """Initialise one SpacyChunker with chunking settings."""
+        self.config = config or ChunkingConfig()
 
-    sentences = _segment_sentences(normalized_text)
-    chunks: list[DocumentChunk] = []
-    index = 0
-    start_sentence_index = 0
+    def set_config(self, config: ChunkingConfig) -> None:
+        """Update chunking settings on one SpacyChunker."""
+        self.config = config
 
-    while start_sentence_index < len(sentences):
-        end_sentence_index = _select_chunk_end_sentence(
-            sentences=sentences,
-            start_sentence_index=start_sentence_index,
-            chunk_size_chars=active_config.chunk_size_chars,
-        )
-        start_char = sentences[start_sentence_index].start_char
-        end_char = sentences[end_sentence_index - 1].end_char
-        chunk_text = normalized_text[start_char:end_char]
-        chunk_id = _build_chunk_id(
-            source_id=version.source_id,
-            source_document_id=version.source_document_id,
-            checksum=version.checksum,
-            chunk_index=index,
-            start_char=start_char,
-            end_char=end_char,
-        )
-        chunks.append(
-            DocumentChunk(
-                chunk_id=chunk_id,
+    def chunk_document_version(
+        self,
+        *,
+        version: SourceDocumentVersion,
+    ) -> list[DocumentChunk]:
+        """Chunk one source document version into text spans for claim extraction."""
+
+
+class SpacyChunker(Chunker):
+    """Chunk one source document version into text spans for claim extraction using spaCy."""
+
+    def chunk_document_version(
+        self,
+        *,
+        version: SourceDocumentVersion,
+    ) -> list[DocumentChunk]:
+        """Split one document version into stable sentence-based chunks."""
+        _validate_chunking_config(self.config)
+
+        normalized_text = version.normalized_text.strip()
+        if not normalized_text:
+            return []
+
+        sentences = _segment_sentences(normalized_text)
+        chunks: list[DocumentChunk] = []
+        index = 0
+        start_sentence_index = 0
+
+        while start_sentence_index < len(sentences):
+            end_sentence_index = _select_chunk_end_sentence(
+                sentences=sentences,
+                start_sentence_index=start_sentence_index,
+                chunk_size_chars=self.config.chunk_size_chars,
+            )
+            start_char = sentences[start_sentence_index].start_char
+            end_char = sentences[end_sentence_index - 1].end_char
+            chunk_text = normalized_text[start_char:end_char]
+            chunk_id = _build_chunk_id(
                 source_id=version.source_id,
                 source_document_id=version.source_document_id,
-                document_checksum=version.checksum,
+                checksum=version.checksum,
                 chunk_index=index,
                 start_char=start_char,
                 end_char=end_char,
-                chunk_text=chunk_text,
-            ),
-        )
-        index += 1
+            )
+            chunks.append(
+                DocumentChunk(
+                    chunk_id=chunk_id,
+                    source_id=version.source_id,
+                    source_document_id=version.source_document_id,
+                    document_checksum=version.checksum,
+                    chunk_index=index,
+                    start_char=start_char,
+                    end_char=end_char,
+                    chunk_text=chunk_text,
+                ),
+            )
+            index += 1
 
-        if end_sentence_index >= len(sentences):
-            break
+            if end_sentence_index >= len(sentences):
+                break
 
-        start_sentence_index = _select_next_chunk_start_sentence(
-            sentences=sentences,
-            current_start_sentence_index=start_sentence_index,
-            current_end_sentence_index=end_sentence_index,
-            chunk_overlap_chars=active_config.chunk_overlap_chars,
-        )
+            start_sentence_index = _select_next_chunk_start_sentence(
+                sentences=sentences,
+                current_start_sentence_index=start_sentence_index,
+                current_end_sentence_index=end_sentence_index,
+                chunk_overlap_chars=self.config.chunk_overlap_chars,
+            )
 
-    return chunks
+        return chunks
 
 
 def _segment_sentences(normalized_text: str) -> list[_SentenceSpan]:

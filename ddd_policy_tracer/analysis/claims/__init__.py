@@ -2,8 +2,12 @@
 
 from .adapters import FilesystemChunkRepository, FilesystemClaimRepository
 from .extractors import (
+    HuggingFaceClaimExtractor,
+    HuggingFaceClaimExtractorConfig,
     LLMClaimExtractor,
     LLMClaimExtractorConfig,
+    MLClaimExtractor,
+    MLClaimExtractorConfig,
     RuleBasedClaimExtractorConfig,
     RuleBasedSentenceClaimExtractor,
 )
@@ -26,8 +30,12 @@ __all__ = [
     "EventPublisher",
     "FilesystemChunkRepository",
     "FilesystemClaimRepository",
+    "HuggingFaceClaimExtractor",
+    "HuggingFaceClaimExtractorConfig",
     "LLMClaimExtractor",
     "LLMClaimExtractorConfig",
+    "MLClaimExtractor",
+    "MLClaimExtractorConfig",
     "RuleBasedClaimExtractorConfig",
     "RuleBasedSentenceClaimExtractor",
 ]

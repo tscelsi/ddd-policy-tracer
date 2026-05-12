@@ -5,13 +5,20 @@ description = "DDD-first policy document acquisition prototype"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "accelerate>=1.12.0",
     "bs4>=0.0.2",
     "httpx>=0.28.1",
     "nltk>=3.9.4",
+    "fastcoref>=2.1.6",
     "pydantic>=2.13.3",
+    "protobuf>=6.33.0",
     "pypdf>=6.10.2",
     "scikit-learn>=1.8.0",
     "spacy>=3.8.14",
+    "sentencepiece>=0.2.0",
+    "torch>=2.8.0",
+    "transformers>=4.57.1",
+    "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]
 
 [dependency-groups]
