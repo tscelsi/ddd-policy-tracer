@@ -114,28 +114,51 @@ def materialize_graph_with_entities(
     for claim in claims:
         claims_by_chunk.setdefault(claim.chunk_id, []).append(claim)
 
+    canonical_links_by_claim_id: dict[str, set[str]] = {}
+    for claim in claims:
+        linked_entities = claim.linked_entities or []
+        linked_keys = {
+            str(linked.get("canonical_entity_key"))
+            for linked in linked_entities
+            if isinstance(linked, dict) and isinstance(linked.get("canonical_entity_key"), str)
+        }
+        canonical_links_by_claim_id[claim.claim_id] = linked_keys
+
     for entity in entities:
+        normalized_value = (
+            entity.canonical_entity_key
+            if entity.canonical_entity_key is not None
+            else entity.normalized_mention_text
+        )
         entity_node_id = _mentioned_entity_node_id(
             entity_type=entity.entity_type,
-            normalized_mention_text=entity.normalized_mention_text,
+            normalized_mention_text=normalized_value,
         )
         nodes_by_id.setdefault(
             entity_node_id,
             GraphNode(
                 id=entity_node_id,
                 type="MentionedEntity",
-                label=entity.mention_text,
+                label=entity.canonical_name or entity.mention_text,
                 properties={
                     "entity_type": entity.entity_type,
                     "normalized_mention_text": entity.normalized_mention_text,
                     "canonical_entity_key": entity.canonical_entity_key,
+                    "canonical_name": entity.canonical_name,
                 },
             ),
         )
 
         chunk_claims = claims_by_chunk.get(entity.chunk_id, [])
         for claim in chunk_claims:
-            if not _entity_matches_claim_text(claim=claim, entity=entity):
+            linked_keys = canonical_links_by_claim_id.get(claim.claim_id, set())
+            if linked_keys and entity.canonical_entity_key not in linked_keys:
+                continue
+            if not _entity_matches_claim_text(
+                claim=claim,
+                entity=entity,
+                has_explicit_link=bool(linked_keys),
+            ):
                 continue
 
             mentions_edge_id = _edge_id(
@@ -212,8 +235,15 @@ def _mentioned_entity_node_id(*, entity_type: str, normalized_mention_text: str)
     return f"entity:{_hash_value(key)}"
 
 
-def _entity_matches_claim_text(*, claim: ClaimRecord, entity: EntityRecord) -> bool:
+def _entity_matches_claim_text(
+    *,
+    claim: ClaimRecord,
+    entity: EntityRecord,
+    has_explicit_link: bool,
+) -> bool:
     """Return true when an entity appears in claim text by two-pass rules."""
+    if has_explicit_link:
+        return True
     entity_text = entity.mention_text.strip()
     if not entity_text:
         return False

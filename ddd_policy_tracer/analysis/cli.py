@@ -1,4 +1,4 @@
-"""CLI entrypoint for analysis chunking operations."""
+"""CLI entrypoint for analysis chunking and canonicalization operations."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ from ddd_policy_tracer.discovery.service_layer import (
     get_source_document_versions,
 )
 
+from .canonicalization.run import main as canonicalization_main
 from .chunks.chunking_models import ChunkingConfig
 from .chunks.service_layer import chunk_and_persist_document_versions
 
 
 def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
-    """Execute chunking commands from the operator CLI surface."""
+    """Execute analysis commands from the operator CLI surface."""
     parser = argparse.ArgumentParser(
         prog="ddd-policy-tracer",
         description="Run analysis operations on acquired source documents.",
@@ -56,7 +57,23 @@ def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
         help="Overlap characters between adjacent chunks.",
     )
 
+    canonicalize_parser = subparsers.add_parser(
+        "canonicalize",
+        help="Run analysis canonicalization workflows",
+    )
+    canonicalize_parser.add_argument(
+        "canonicalization_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded to canonicalization subcommands.",
+    )
+
     args = parser.parse_args(list(argv))
+    if args.command == "canonicalize":
+        forwarded = list(args.canonicalization_args)
+        if forwarded and forwarded[0] == "--":
+            forwarded = forwarded[1:]
+        return canonicalization_main(forwarded)
+
     if args.command != "chunk":
         parser.print_help(file=stdout)
         return 2

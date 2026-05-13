@@ -31,6 +31,7 @@ def _claim_row(*, claim_id: str, chunk_id: str, source_id: str) -> dict[str, obj
         "confidence": 0.9,
         "claim_type": "descriptive",
         "extractor_version": "rules-v1",
+        "linked_entities": [],
     }
 
 
@@ -55,6 +56,7 @@ def _entity_row(
         "confidence": 0.9,
         "extractor_version": "rules-v1",
         "canonical_entity_key": None,
+        "canonical_name": None,
     }
 
 
@@ -110,3 +112,77 @@ def test_graph_scaffold_script_writes_required_artifacts(tmp_path: Path) -> None
         "graph.html",
     ):
         assert (latest_dir / file_name).exists()
+
+
+def test_graph_scaffold_script_accepts_canonical_opt_in_inputs(tmp_path: Path) -> None:
+    """Run graph scaffold CLI with canonical artifacts as explicit inputs."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims_canonical.jsonl"
+    entities_path = tmp_path / "entities_canonical.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
+    _write_jsonl(
+        claims_path,
+        [
+            {
+                **_claim_row(
+                    claim_id="claim-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                ),
+                "linked_entities": [
+                    {
+                        "canonical_entity_key": "entity_canon_abc",
+                        "entity_type": "ORG",
+                        "canonical_name": "claim",
+                        "link_method": "span_overlap",
+                        "entity_id": "entity-1",
+                    },
+                ],
+            },
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            {
+                **_entity_row(
+                    entity_id="entity-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                ),
+                "canonical_entity_key": "entity_canon_abc",
+                "canonical_name": "claim",
+            },
+        ],
+    )
+
+    uv_executable = shutil.which("uv")
+    if uv_executable is None:
+        raise AssertionError("uv executable not found in PATH")
+
+    result = subprocess.run(  # noqa: S603
+        [
+            uv_executable,
+            "run",
+            "python",
+            "-m",
+            "ddd_policy_tracer.analysis.graph.run",
+            "--chunks-path",
+            str(chunks_path),
+            "--claims-path",
+            str(claims_path),
+            "--entities-path",
+            str(entities_path),
+            "--output-root",
+            str(output_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    graph_payload = json.loads((output_root / "latest" / "graph.json").read_text(encoding="utf-8"))
+    edge_types = {edge["type"] for edge in graph_payload["edges"]}
+    assert "MENTIONS" in edge_types

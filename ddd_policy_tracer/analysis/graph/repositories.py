@@ -23,6 +23,7 @@ class ClaimRecord:
     confidence: float
     claim_type: str | None
     extractor_version: str
+    linked_entities: list[dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class EntityRecord:
     confidence: float
     extractor_version: str
     canonical_entity_key: str | None
+    canonical_name: str | None = None
 
 
 class EntityRepository:
@@ -134,6 +136,14 @@ def _payload_to_claim(payload: dict[str, object]) -> ClaimRecord:
     )
     claim_type_value = payload.get("claim_type")
     claim_type = claim_type_value if claim_type_value is None else str(claim_type_value)
+    linked_entities_payload = payload.get("linked_entities")
+    linked_entities: list[dict[str, object]] | None = None
+    if isinstance(linked_entities_payload, list):
+        extracted: list[dict[str, object]] = []
+        for entry in linked_entities_payload:
+            if isinstance(entry, dict):
+                extracted.append(entry)
+        linked_entities = extracted
     return ClaimRecord(
         claim_id=str(payload["claim_id"]),
         chunk_id=str(payload["chunk_id"]),
@@ -147,6 +157,7 @@ def _payload_to_claim(payload: dict[str, object]) -> ClaimRecord:
         confidence=float(payload["confidence"]),
         claim_type=claim_type,
         extractor_version=str(payload["extractor_version"]),
+        linked_entities=linked_entities,
     )
 
 
@@ -170,6 +181,7 @@ def _payload_to_entity(payload: dict[str, object]) -> EntityRecord:
         ),
     )
     canonical_key = payload.get("canonical_entity_key")
+    canonical_name = payload.get("canonical_name")
     return EntityRecord(
         entity_id=str(payload["entity_id"]),
         chunk_id=str(payload["chunk_id"]),
@@ -184,6 +196,7 @@ def _payload_to_entity(payload: dict[str, object]) -> EntityRecord:
         confidence=float(payload["confidence"]),
         extractor_version=str(payload["extractor_version"]),
         canonical_entity_key=canonical_key if canonical_key is None else str(canonical_key),
+        canonical_name=canonical_name if canonical_name is None else str(canonical_name),
     )
 
 

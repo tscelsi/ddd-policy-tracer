@@ -15,7 +15,7 @@ def run_cli(
     stdout: TextIO,
     fetch: Callable[[str, str], str] | None = None,
 ) -> int:
-    """Route CLI requests to discovery acquire or analysis chunk flows."""
+    """Route CLI requests to discovery and analysis command flows."""
     args = list(argv)
     if not args:
         return run_discovery_cli(args, stdout=stdout, fetch=fetch)
@@ -23,7 +23,7 @@ def run_cli(
     command = args[0]
     if command == "acquire":
         return run_discovery_cli(args, stdout=stdout, fetch=fetch)
-    if command == "chunk":
+    if command in {"chunk", "canonicalize"}:
         return run_analysis_cli(args, stdout=stdout)
 
     return run_discovery_cli(args, stdout=stdout, fetch=fetch)

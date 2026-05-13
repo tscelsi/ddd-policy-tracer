@@ -33,6 +33,7 @@ def _claim_row(*, claim_id: str, chunk_id: str, source_id: str) -> dict[str, obj
         "confidence": 0.95,
         "claim_type": "descriptive",
         "extractor_version": "rules-v1",
+        "linked_entities": [],
     }
 
 
@@ -60,6 +61,7 @@ def _entity_row(
         "confidence": 0.9,
         "extractor_version": "rules-v1",
         "canonical_entity_key": None,
+        "canonical_name": None,
     }
 
 
@@ -675,3 +677,62 @@ def test_run_graph_html_references_cytoscape_and_filtered_graph(tmp_path: Path) 
     assert "cytoscape" in html
     assert "const payload = {" in html
     assert "Selection" in html
+
+
+def test_run_links_mentions_using_claim_linked_entities_when_present(tmp_path: Path) -> None:
+    """Build mentions edges from canonical linked_entities instead of text only."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities_canonical.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
+    _write_jsonl(
+        claims_path,
+        [
+            {
+                **_claim_row(
+                    claim_id="claim-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                ),
+                "normalized_claim_text": "policy should reduce emissions",
+                "linked_entities": [
+                    {
+                        "canonical_entity_key": "entity_canon_abc",
+                        "entity_type": "ORG",
+                        "canonical_name": "australia institute",
+                        "link_method": "span_overlap",
+                        "entity_id": "entity-1",
+                    },
+                ],
+            },
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            {
+                **_entity_row(
+                    entity_id="entity-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                    mention_text="Unrelated text",
+                    normalized_mention_text="unrelated text",
+                    entity_type="ORG",
+                ),
+                "canonical_entity_key": "entity_canon_abc",
+                "canonical_name": "australia institute",
+            },
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+    )
+
+    graph_payload = json.loads((result.run_directory / "graph.json").read_text(encoding="utf-8"))
+    mentions_edges = [edge for edge in graph_payload["edges"] if edge["type"] == "MENTIONS"]
+    assert len(mentions_edges) == 1
