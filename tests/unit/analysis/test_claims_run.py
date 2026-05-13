@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ddd_policy_tracer.analysis.claims import (
     LLMClaimExtractor,
+    OllamaClaimExtractor,
     RuleBasedSentenceClaimExtractor,
 )
 from ddd_policy_tracer.analysis.claims.run import _build_extractor, _load_chunk_ids
@@ -37,6 +38,19 @@ def test_build_extractor_returns_llm_strategy() -> None:
     assert isinstance(extractor, LLMClaimExtractor)
     assert extractor.config.model == "gpt-4.1-mini"
     assert extractor.config.temperature == 0.2
+
+
+def test_build_extractor_returns_ollama_strategy() -> None:
+    """Build Ollama extractor when strategy is configured as ollama."""
+    extractor = _build_extractor(
+        extractor_kind="ollama",
+        rule_threshold=0.8,
+        llm_model="llama3.1:8b",
+        llm_temperature=0.0,
+    )
+
+    assert isinstance(extractor, OllamaClaimExtractor)
+    assert extractor.config.model == "llama3.1:8b"
 
 
 def test_load_chunk_ids_reads_unique_ids_in_file_order(tmp_path: Path) -> None:

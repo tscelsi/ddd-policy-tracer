@@ -8,6 +8,8 @@ from .extractors import (
     LLMClaimExtractorConfig,
     MLClaimExtractor,
     MLClaimExtractorConfig,
+    OllamaClaimExtractor,
+    OllamaClaimExtractorConfig,
     RuleBasedClaimExtractorConfig,
     RuleBasedSentenceClaimExtractor,
 )
@@ -36,6 +38,8 @@ __all__ = [
     "LLMClaimExtractorConfig",
     "MLClaimExtractor",
     "MLClaimExtractorConfig",
+    "OllamaClaimExtractor",
+    "OllamaClaimExtractorConfig",
     "RuleBasedClaimExtractorConfig",
     "RuleBasedSentenceClaimExtractor",
 ]

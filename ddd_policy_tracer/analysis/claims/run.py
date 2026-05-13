@@ -15,6 +15,8 @@ from .adapters import FilesystemChunkRepository, FilesystemClaimRepository
 from .extractors import (
     LLMClaimExtractor,
     LLMClaimExtractorConfig,
+    OllamaClaimExtractor,
+    OllamaClaimExtractorConfig,
     RuleBasedClaimExtractorConfig,
     RuleBasedSentenceClaimExtractor,
 )
@@ -28,7 +30,7 @@ def run(
     chunk_id: str,
     chunk_state_path: Path,
     claim_state_path: Path,
-    extractor_kind: Literal["rule", "llm"] = "rule",
+    extractor_kind: Literal["rule", "llm", "ollama"] = "rule",
     rule_threshold: float = 0.8,
     llm_model: str = "gpt-4.1-mini",
     llm_temperature: float = 0.0,
@@ -49,7 +51,7 @@ def run_bulk(
     *,
     chunk_state_path: Path,
     claim_state_path: Path,
-    extractor_kind: Literal["rule", "llm"] = "rule",
+    extractor_kind: Literal["rule", "llm", "ollama"] = "rule",
     rule_threshold: float = 0.8,
     llm_model: str = "gpt-4.1-mini",
     llm_temperature: float = 0.0,
@@ -71,7 +73,7 @@ def _build_service(
     *,
     chunk_state_path: Path,
     claim_state_path: Path,
-    extractor_kind: Literal["rule", "llm"],
+    extractor_kind: Literal["rule", "llm", "ollama"],
     rule_threshold: float,
     llm_model: str,
     llm_temperature: float,
@@ -116,7 +118,7 @@ def _load_chunk_ids(*, chunk_state_path: Path) -> list[str]:
 
 def _build_extractor(
     *,
-    extractor_kind: Literal["rule", "llm"],
+    extractor_kind: Literal["rule", "llm", "ollama"],
     rule_threshold: float,
     llm_model: str,
     llm_temperature: float,
@@ -127,6 +129,12 @@ def _build_extractor(
             config=LLMClaimExtractorConfig(
                 model=llm_model,
                 temperature=llm_temperature,
+            ),
+        )
+    if extractor_kind == "ollama":
+        return OllamaClaimExtractor(
+            config=OllamaClaimExtractorConfig(
+                model=llm_model,
             ),
         )
     return RuleBasedSentenceClaimExtractor(
@@ -162,7 +170,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--extractor",
-        choices=["rule", "llm"],
+        choices=["rule", "llm", "ollama"],
         default=None,
         help="Extractor strategy override. Falls back to CLAIMS_EXTRACTOR env var.",
     )
@@ -192,8 +200,8 @@ def main() -> int:
     args = parser.parse_args()
     env_extractor = os.environ.get("CLAIMS_EXTRACTOR", "rule")
     extractor_kind = args.extractor or env_extractor
-    if extractor_kind not in {"rule", "llm"}:
-        raise ValueError("CLAIMS_EXTRACTOR must be either 'rule' or 'llm'")
+    if extractor_kind not in {"rule", "llm", "ollama"}:
+        raise ValueError("CLAIMS_EXTRACTOR must be one of: 'rule', 'llm', 'ollama'")
 
     chunk_state_path = Path(args.chunk_state_path)
     claim_state_path = Path(args.claim_state_path)

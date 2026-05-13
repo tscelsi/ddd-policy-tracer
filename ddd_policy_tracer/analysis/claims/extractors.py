@@ -19,6 +19,7 @@ from .models import ClaimCandidate
 from .ports import ClaimExtractor
 
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 _ML_TOKEN_RE = re.compile(r"\w+|[^\w\s]", flags=re.UNICODE)
 _HF_GENERATOR_CACHE: dict[str, HuggingFaceGenerator] = {}
 
@@ -163,14 +164,134 @@ class LLMClaimExtractor(ClaimExtractor):
         data = response.json()
         try:
             content = data["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
-            claims = parsed.get("claims", [])
+            claims = _parse_claims_from_json_content(content)
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise ValueError("Invalid LLM response format for claim extraction") from exc
 
         if not isinstance(claims, list):
             return []
         return [str(claim).strip() for claim in claims if str(claim).strip()]
+
+
+@dataclass(frozen=True)
+class OllamaClaimExtractorConfig:
+    """Configure a local Ollama-backed claim extraction strategy."""
+
+    model: str = "llama3.1:8b"
+    max_claims_per_chunk: int = 8
+    request_timeout_seconds: float = 60.0
+    api_url: str = OLLAMA_CHAT_URL
+    extractor_version: str = "ollama-v1"
+
+
+@dataclass(frozen=True)
+class OllamaClaimExtractor(ClaimExtractor):
+    """Extract claim candidates by prompting a local Ollama model."""
+
+    config: OllamaClaimExtractorConfig = OllamaClaimExtractorConfig()
+    http_client: HttpClient | None = None
+
+    def extract(self, *, chunk: DocumentChunk) -> list[ClaimCandidate]:
+        """Return claim candidates extracted from one chunk via Ollama."""
+        claims = self._request_claim_strings(chunk=chunk)
+        candidates: list[ClaimCandidate] = []
+        used_spans: set[tuple[int, int]] = set()
+
+        for claim_text in claims:
+            normalized_claim = _normalize_claim_text(claim_text)
+            if not normalized_claim:
+                continue
+
+            offsets = _find_claim_offsets(
+                chunk_text=chunk.chunk_text,
+                claim_text=claim_text,
+                used_spans=used_spans,
+            )
+            if offsets is None:
+                continue
+
+            start_char, end_char = offsets
+            used_spans.add(offsets)
+            evidence_text = chunk.chunk_text[start_char:end_char]
+            candidates.append(
+                _build_claim_candidate(
+                    chunk=chunk,
+                    start_char=start_char,
+                    end_char=end_char,
+                    evidence_text=evidence_text,
+                    confidence=1.0,
+                    extractor_version=self.config.extractor_version,
+                ),
+            )
+
+        return candidates
+
+    def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
+        """Count sentence units in chunk text for report semantics."""
+        return _count_chunk_sentences(chunk)
+
+    def _request_claim_strings(self, *, chunk: DocumentChunk) -> list[str]:
+        """Call Ollama endpoint and return raw claim strings."""
+        prompt = (
+            "Extract policy-relevant claims from the text. "
+            "Return only claims that are exact substrings from input text. "
+            "Return JSON object with key claims as array of strings. "
+            f"Limit to at most {self.config.max_claims_per_chunk} claims."
+        )
+        payload = {
+            "model": self.config.model,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": ("You are a strict claim extraction assistant. Do not paraphrase."),
+                },
+                {
+                    "role": "user",
+                    "content": f"{prompt}\n\nTEXT:\n{chunk.chunk_text}",
+                },
+            ],
+        }
+
+        if self.http_client is None:
+            with httpx.Client(
+                timeout=self.config.request_timeout_seconds,
+            ) as client:
+                response = client.post(
+                    self.config.api_url,
+                    headers={
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+        else:
+            response = self.http_client.post(
+                self.config.api_url,
+                headers={
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+
+        response.raise_for_status()
+        data = response.json()
+        try:
+            content = data["message"]["content"]
+            claims = _parse_claims_from_json_content(content)
+        except (KeyError, json.JSONDecodeError) as exc:
+            raise ValueError("Invalid Ollama response format for claim extraction") from exc
+
+        if not isinstance(claims, list):
+            return []
+        return [str(claim).strip() for claim in claims if str(claim).strip()]
+
+
+def _parse_claims_from_json_content(content: str) -> list[object]:
+    """Parse claims list from JSON object text content."""
+    parsed = json.loads(content)
+    claims = parsed.get("claims", []) if isinstance(parsed, dict) else []
+    return claims if isinstance(claims, list) else []
 
 
 @dataclass(frozen=True)
