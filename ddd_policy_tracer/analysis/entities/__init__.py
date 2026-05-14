@@ -11,6 +11,7 @@ from .extractors import (
     SpacyFastCorefEntityExtractorConfig,
 )
 from .models import EntityExtractionReport, EntityMention, EntityType
+from .retrieval import HybridCatalogRetriever, RetrievalCandidate, RetrievalResult
 from .ports import (
     ChunkRepository,
     EntityExtractor,
@@ -37,6 +38,9 @@ __all__ = [
     "RobustEnsembleEntityExtractorConfig",
     "RuleBasedEntityExtractorConfig",
     "RuleBasedSentenceEntityExtractor",
+    "HybridCatalogRetriever",
+    "RetrievalCandidate",
+    "RetrievalResult",
     "SpacyFastCorefEntityExtractor",
     "SpacyFastCorefEntityExtractorConfig",
 ]
