@@ -557,10 +557,28 @@ class RobustEnsembleEntityExtractor(EntityExtractor):
 
     def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
         """Run extraction for many chunks using deterministic ordering."""
-        entities: list[EntityMention] = []
+        if not chunks:
+            return []
+        rule_mentions = self._rule_extractor().extract_many(chunks=chunks)
+        spacy_mentions = self._spacy_extractor().extract_many(chunks=chunks)
+        gazetteer_mentions = [
+            mention
+            for chunk in chunks
+            for mention in self._extract_gazetteer_dependency_mentions(chunk=chunk)
+        ]
+        rule_by_chunk = _group_mentions_by_chunk(rule_mentions)
+        spacy_by_chunk = _group_mentions_by_chunk(spacy_mentions)
+        gazetteer_by_chunk = _group_mentions_by_chunk(gazetteer_mentions)
+
+        merged: list[EntityMention] = []
         for chunk in chunks:
-            entities.extend(self.extract(chunk=chunk))
-        return entities
+            chunk_merged = self._merge_mentions(
+                rule_mentions=rule_by_chunk.get(chunk.chunk_id, []),
+                spacy_mentions=spacy_by_chunk.get(chunk.chunk_id, []),
+                gazetteer_mentions=gazetteer_by_chunk.get(chunk.chunk_id, []),
+            )
+            merged.extend(self._with_runtime_version(mention=mention) for mention in chunk_merged)
+        return merged
 
     def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
         """Count processed sentence-like units for reporting semantics."""
@@ -754,6 +772,14 @@ def _map_gazetteer_entity_type(*, cue: str) -> EntityType:
     if lowered in _PROGRAM_CUES:
         return "PROGRAM"
     return "ORG"
+
+
+def _group_mentions_by_chunk(mentions: list[EntityMention]) -> dict[str, list[EntityMention]]:
+    """Group extracted mentions by chunk identifier for batch merge."""
+    grouped: dict[str, list[EntityMention]] = {}
+    for mention in mentions:
+        grouped.setdefault(mention.chunk_id, []).append(mention)
+    return grouped
 
 
 def _build_coref_canonical_lookup(doc: SpacyDocLike) -> dict[tuple[int, int], str]:

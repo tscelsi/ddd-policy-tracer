@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from ddd_policy_tracer.analysis.entities import RobustEnsembleEntityExtractor
@@ -67,6 +68,14 @@ def test_build_parser_defaults_entity_extractor_version_from_env(
     args = parser.parse_args(["--chunk-id", "chunk_1"])
 
     assert args.extractor_version == "rules-test"
+
+
+def test_build_parser_rejects_legacy_extractor_choices() -> None:
+    """Reject legacy extractor strategy values after robust cutover."""
+    parser = _build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--chunk-id", "chunk_1", "--extractor", "rule"])
 
 
 def test_robust_ensemble_extractor_default_wiring_type() -> None:
