@@ -1,6 +1,7 @@
 """Public exports for entities bounded context."""
 
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
+from .catalog import CatalogImportReport, get_catalog_metadata, import_seed_catalog
 from .extractors import (
     RuleBasedEntityExtractorConfig,
     RuleBasedSentenceEntityExtractor,
@@ -18,6 +19,7 @@ from .service_layer import EntitiesService
 
 __all__ = [
     "ChunkRepository",
+    "CatalogImportReport",
     "EntitiesService",
     "EntityExtractionReport",
     "EntityExtractor",
@@ -27,6 +29,8 @@ __all__ = [
     "EventPublisher",
     "FilesystemChunkRepository",
     "FilesystemEntityRepository",
+    "get_catalog_metadata",
+    "import_seed_catalog",
     "RuleBasedEntityExtractorConfig",
     "RuleBasedSentenceEntityExtractor",
     "SpacyFastCorefEntityExtractor",

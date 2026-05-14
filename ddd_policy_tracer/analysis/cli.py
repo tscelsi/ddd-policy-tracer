@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
@@ -13,6 +14,7 @@ from ddd_policy_tracer.discovery.service_layer import (
 )
 
 from .canonicalization.run import main as canonicalization_main
+from .entities.catalog import import_seed_catalog
 from .chunks.chunking_models import ChunkingConfig
 from .chunks.service_layer import chunk_and_persist_document_versions
 
@@ -67,12 +69,59 @@ def run_cli(argv: Sequence[str], *, stdout: TextIO) -> int:
         help="Arguments forwarded to canonicalization subcommands.",
     )
 
+    entities_catalog_parser = subparsers.add_parser(
+        "entities-catalog",
+        help="Manage runtime entity catalog operations",
+    )
+    entities_catalog_parser.add_argument(
+        "--seed-path",
+        required=True,
+        help="Path to curated seed JSONL data.",
+    )
+    entities_catalog_parser.add_argument(
+        "--catalog-path",
+        required=True,
+        help="Path to runtime SQLite catalog database.",
+    )
+    entities_catalog_parser.add_argument(
+        "--vectors-path",
+        required=True,
+        help="Path to sidecar vectors JSON artifact.",
+    )
+    entities_catalog_parser.add_argument(
+        "--catalog-version",
+        default="catalog-v1",
+        help="Catalog version metadata value for compatibility checks.",
+    )
+
     args = parser.parse_args(list(argv))
     if args.command == "canonicalize":
         forwarded = list(args.canonicalization_args)
         if forwarded and forwarded[0] == "--":
             forwarded = forwarded[1:]
         return canonicalization_main(forwarded)
+
+    if args.command == "entities-catalog":
+        report = import_seed_catalog(
+            seed_path=Path(args.seed_path),
+            catalog_path=Path(args.catalog_path),
+            vectors_path=Path(args.vectors_path),
+            catalog_version=args.catalog_version,
+        )
+        stdout.write(
+            json.dumps(
+                {
+                    "catalog_version": report.catalog_version,
+                    "seed_hash": report.seed_hash,
+                    "processed_records": report.processed_records,
+                    "inserted_records": report.inserted_records,
+                    "vectors_written": report.vectors_written,
+                },
+                ensure_ascii=True,
+            )
+            + "\n",
+        )
+        return 0
 
     if args.command != "chunk":
         parser.print_help(file=stdout)

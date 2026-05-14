@@ -23,7 +23,7 @@ def run_cli(
     command = args[0]
     if command == "acquire":
         return run_discovery_cli(args, stdout=stdout, fetch=fetch)
-    if command in {"chunk", "canonicalize"}:
+    if command in {"chunk", "canonicalize", "entities-catalog"}:
         return run_analysis_cli(args, stdout=stdout)
 
     return run_discovery_cli(args, stdout=stdout, fetch=fetch)
