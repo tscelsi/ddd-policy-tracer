@@ -24,6 +24,7 @@ class ClaimRecord:
     claim_type: str | None
     extractor_version: str
     linked_entities: list[dict[str, object]] | None = None
+    pending_entity_links: list[dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,14 @@ def _payload_to_claim(payload: dict[str, object]) -> ClaimRecord:
             if isinstance(entry, dict):
                 extracted.append(entry)
         linked_entities = extracted
+    pending_payload = payload.get("pending_entity_links")
+    pending_entity_links: list[dict[str, object]] | None = None
+    if isinstance(pending_payload, list):
+        extracted_pending: list[dict[str, object]] = []
+        for entry in pending_payload:
+            if isinstance(entry, dict):
+                extracted_pending.append(entry)
+        pending_entity_links = extracted_pending
     return ClaimRecord(
         claim_id=str(payload["claim_id"]),
         chunk_id=str(payload["chunk_id"]),
@@ -158,6 +167,7 @@ def _payload_to_claim(payload: dict[str, object]) -> ClaimRecord:
         claim_type=claim_type,
         extractor_version=str(payload["extractor_version"]),
         linked_entities=linked_entities,
+        pending_entity_links=pending_entity_links,
     )
 
 

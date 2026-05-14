@@ -15,6 +15,7 @@ from .models import (
     CanonicalizationMetadata,
     LinkedEntityEvidence,
     LinkedEntityRecord,
+    PendingEntityLinkRecord,
 )
 
 
@@ -76,6 +77,9 @@ def canonicalize_entities(
                 extractor_version=entity.extractor_version,
                 canonical_name=canonical_name,
                 canonical_entity_key=canonical_entity_key,
+                decision_status=_decision_status_from_metadata(entity),
+                decision_score=_decision_score_from_metadata(entity),
+                selected_candidate_key=_selected_candidate_key_from_metadata(entity),
                 canonicalization=metadata,
             ),
         )
@@ -114,6 +118,25 @@ def canonicalize_claims(
     for claim in claims:
         chunk_entities = entities_by_chunk.get(claim.chunk_id, [])
         linked_entities = _link_entities_for_claim(claim=claim, entities=chunk_entities)
+        immediate_links = [
+            linked
+            for linked in linked_entities
+            if _decision_status_for_entity(linked.entity_id, chunk_entities) == "linked"
+        ]
+        pending_links = [
+            PendingEntityLinkRecord(
+                canonical_entity_key=linked.canonical_entity_key,
+                entity_type=linked.entity_type,
+                canonical_name=linked.canonical_name,
+                decision_status=_decision_status_for_entity(linked.entity_id, chunk_entities),
+                decision_score=_decision_score_for_entity(linked.entity_id, chunk_entities),
+                entity_id=linked.entity_id,
+                evidence=linked.evidence,
+            )
+            for linked in linked_entities
+            if _decision_status_for_entity(linked.entity_id, chunk_entities)
+            in {"needs_review", "new_candidate", "abstain"}
+        ]
         rows.append(
             CanonicalClaimRecord(
                 claim_id=claim.claim_id,
@@ -128,7 +151,8 @@ def canonicalize_claims(
                 confidence=claim.confidence,
                 claim_type=claim.claim_type,
                 extractor_version=claim.extractor_version,
-                linked_entities=linked_entities,
+                linked_entities=immediate_links,
+                pending_entity_links=pending_links,
                 canonicalization=metadata,
             ),
         )
@@ -227,3 +251,42 @@ def _normalize_match_value(value: str) -> str:
     lowered = value.casefold()
     no_punctuation = re.sub(r"[^a-z0-9\s]", " ", lowered)
     return " ".join(no_punctuation.split())
+
+
+def _decision_status_from_metadata(entity: EntityMention) -> str:
+    """Read resolver decision status from mention metadata with default link."""
+    metadata = entity.metadata or {}
+    value = metadata.get("decision_status")
+    return str(value) if isinstance(value, str) else "linked"
+
+
+def _decision_score_from_metadata(entity: EntityMention) -> float | None:
+    """Read resolver decision score from mention metadata when present."""
+    metadata = entity.metadata or {}
+    value = metadata.get("decision_score")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _selected_candidate_key_from_metadata(entity: EntityMention) -> str | None:
+    """Read selected candidate key from mention metadata when present."""
+    metadata = entity.metadata or {}
+    value = metadata.get("selected_candidate_key")
+    return str(value) if isinstance(value, str) else None
+
+
+def _decision_status_for_entity(entity_id: str, entities: list[CanonicalEntityRecord]) -> str:
+    """Resolve decision status for one canonical entity identity."""
+    for entity in entities:
+        if entity.entity_id == entity_id:
+            return entity.decision_status or "linked"
+    return "linked"
+
+
+def _decision_score_for_entity(entity_id: str, entities: list[CanonicalEntityRecord]) -> float | None:
+    """Resolve decision score for one canonical entity identity."""
+    for entity in entities:
+        if entity.entity_id == entity_id:
+            return entity.decision_score
+    return None

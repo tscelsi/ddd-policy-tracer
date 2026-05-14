@@ -35,6 +35,9 @@ class CanonicalEntityRecord:
     canonical_name: str
     canonical_entity_key: str
     canonicalization: CanonicalizationMetadata
+    decision_status: str | None = None
+    decision_score: float | None = None
+    selected_candidate_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,19 @@ class LinkedEntityRecord:
 
 
 @dataclass(frozen=True)
+class PendingEntityLinkRecord:
+    """Represent unresolved entity linkage retained for later backfill."""
+
+    canonical_entity_key: str
+    entity_type: str
+    canonical_name: str
+    decision_status: str
+    decision_score: float | None
+    entity_id: str
+    evidence: LinkedEntityEvidence | None
+
+
+@dataclass(frozen=True)
 class CanonicalClaimRecord:
     """Represent one canonicalized claim row with linked entities."""
 
@@ -75,6 +91,7 @@ class CanonicalClaimRecord:
     claim_type: str | None
     extractor_version: str
     linked_entities: list[LinkedEntityRecord]
+    pending_entity_links: list[PendingEntityLinkRecord]
     canonicalization: CanonicalizationMetadata
 
 

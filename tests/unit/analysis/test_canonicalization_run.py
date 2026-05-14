@@ -26,6 +26,8 @@ def _entity_row(
     end_char: int,
     mention_text: str,
     normalized_mention_text: str,
+    decision_status: str = "linked",
+    decision_score: float = 0.9,
 ) -> dict[str, object]:
     """Build one source entity row for canonicalization fixtures."""
     return {
@@ -42,7 +44,11 @@ def _entity_row(
         "confidence": 0.9,
         "extractor_version": "rules-v1",
         "canonical_entity_key": None,
-        "metadata": None,
+        "metadata": {
+            "decision_status": decision_status,
+            "decision_score": decision_score,
+            "selected_candidate_key": "entity_canon_selected",
+        },
     }
 
 
@@ -179,6 +185,75 @@ def test_run_claims_links_entities_by_span_then_text_fallback(tmp_path: Path) ->
     methods = {entry["entity_id"]: entry["link_method"] for entry in linked}
     assert methods["entity-span"] == "span_overlap"
     assert methods["entity-fallback"] == "text_match_fallback"
+
+
+def test_run_claims_keeps_unresolved_links_as_pending_entity_links(tmp_path: Path) -> None:
+    """Persist unresolved entity links for deferred review backfill workflows."""
+    entities_path = tmp_path / "entities.jsonl"
+    entities_canonical_path = tmp_path / "entities_canonical.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    claims_canonical_path = tmp_path / "claims_canonical.jsonl"
+    _write_jsonl(
+        entities_path,
+        [
+            _entity_row(
+                entity_id="entity-linked",
+                chunk_id="chunk-1",
+                start_char=5,
+                end_char=15,
+                mention_text="Institute",
+                normalized_mention_text="Institute",
+                decision_status="linked",
+                decision_score=0.9,
+            ),
+            _entity_row(
+                entity_id="entity-review",
+                chunk_id="chunk-1",
+                start_char=20,
+                end_char=30,
+                mention_text="Policy",
+                normalized_mention_text="Policy",
+                decision_status="needs_review",
+                decision_score=0.7,
+            ),
+        ],
+    )
+    _write_jsonl(
+        claims_path,
+        [
+            _claim_row(
+                claim_id="claim-1",
+                chunk_id="chunk-1",
+                start_char=0,
+                end_char=40,
+                normalized_claim_text="institute should support policy outcomes",
+            ),
+        ],
+    )
+    run_entities(
+        entities_path=entities_path,
+        entities_canonical_path=entities_canonical_path,
+        entity_canonicalizer_version="entity-v1",
+    )
+
+    run_claims(
+        claims_path=claims_path,
+        entities_canonical_path=entities_canonical_path,
+        claims_canonical_path=claims_canonical_path,
+        claim_canonicalizer_version="claim-v1",
+        required_entity_canonicalizer_version="entity-v1",
+    )
+
+    rows = [
+        json.loads(line)
+        for line in claims_canonical_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 1
+    assert len(rows[0]["linked_entities"]) == 1
+    assert rows[0]["linked_entities"][0]["entity_id"] == "entity-linked"
+    assert len(rows[0]["pending_entity_links"]) == 1
+    assert rows[0]["pending_entity_links"][0]["entity_id"] == "entity-review"
+    assert rows[0]["pending_entity_links"][0]["decision_status"] == "needs_review"
 
 
 def test_run_claims_fails_when_required_entity_version_mismatch(tmp_path: Path) -> None:
