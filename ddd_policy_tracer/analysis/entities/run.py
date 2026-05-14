@@ -14,6 +14,8 @@ from ddd_policy_tracer.utils.events.local import LocalPublisher
 
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
 from .extractors import (
+    RobustEnsembleEntityExtractor,
+    RobustEnsembleEntityExtractorConfig,
     RuleBasedEntityExtractorConfig,
     RuleBasedSentenceEntityExtractor,
     SpacyFastCorefEntityExtractor,
@@ -28,8 +30,8 @@ def run(
     chunk_id: str,
     chunk_state_path: Path,
     entity_state_path: Path,
-    extractor_kind: Literal["rule", "spacy-fastcoref"] = "rule",
-    extractor_version: str = "rules-v1",
+    extractor_kind: Literal["robust-ensemble"] = "robust-ensemble",
+    extractor_version: str = "robust-ensemble-v1",
 ) -> EntityExtractionReport:
     """Run one concrete entities extraction for a single chunk identifier."""
     service = _build_service(
@@ -45,8 +47,8 @@ def run_bulk(
     *,
     chunk_state_path: Path,
     entity_state_path: Path,
-    extractor_kind: Literal["rule", "spacy-fastcoref"] = "rule",
-    extractor_version: str = "rules-v1",
+    extractor_kind: Literal["robust-ensemble"] = "robust-ensemble",
+    extractor_version: str = "robust-ensemble-v1",
 ) -> list[EntityExtractionReport]:
     """Run entities extraction for all chunks available in one dataset."""
     service = _build_service(
@@ -62,20 +64,27 @@ def _build_service(
     *,
     chunk_state_path: Path,
     entity_state_path: Path,
-    extractor_kind: Literal["rule", "spacy-fastcoref"],
+    extractor_kind: Literal["robust-ensemble"],
     extractor_version: str,
 ) -> EntitiesService:
     """Build entities service dependencies from CLI configuration."""
-    if extractor_kind == "spacy-fastcoref":
-        extractor = SpacyFastCorefEntityExtractor(
-            config=SpacyFastCorefEntityExtractorConfig(
-                extractor_version=extractor_version,
+    _ = extractor_kind
+    extractor = RobustEnsembleEntityExtractor(
+        config=RobustEnsembleEntityExtractorConfig(
+            extractor_version=extractor_version,
+        ),
+        rule_extractor=RuleBasedSentenceEntityExtractor(
+            RuleBasedEntityExtractorConfig(
+                extractor_version=f"{extractor_version}-rule",
             ),
-        )
-    else:
-        extractor = RuleBasedSentenceEntityExtractor(
-            RuleBasedEntityExtractorConfig(extractor_version=extractor_version),
-        )
+        ),
+        spacy_extractor=SpacyFastCorefEntityExtractor(
+            config=SpacyFastCorefEntityExtractorConfig(
+                extractor_version=f"{extractor_version}-spacy",
+                fallback_to_rule_extractor=False,
+            ),
+        ),
+    )
     return EntitiesService(
         chunk_repository=FilesystemChunkRepository(chunk_state_path),
         entity_repository=FilesystemEntityRepository(entity_state_path),
@@ -112,13 +121,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--extractor",
-        choices=["rule", "spacy-fastcoref"],
-        default=os.environ.get("ENTITY_EXTRACTOR", "rule"),
+        choices=["robust-ensemble"],
+        default="robust-ensemble",
         help="Extractor strategy to use for entity extraction.",
     )
     parser.add_argument(
         "--extractor-version",
-        default=os.environ.get("ENTITY_EXTRACTOR_VERSION", "rules-v1"),
+        default=os.environ.get("ENTITY_EXTRACTOR_VERSION", "robust-ensemble-v1"),
         help="Extractor version tag for deterministic entity ids.",
     )
     parser.add_argument(

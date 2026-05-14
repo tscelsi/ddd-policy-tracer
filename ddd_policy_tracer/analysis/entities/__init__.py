@@ -3,6 +3,8 @@
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
 from .catalog import CatalogImportReport, get_catalog_metadata, import_seed_catalog
 from .extractors import (
+    RobustEnsembleEntityExtractor,
+    RobustEnsembleEntityExtractorConfig,
     RuleBasedEntityExtractorConfig,
     RuleBasedSentenceEntityExtractor,
     SpacyFastCorefEntityExtractor,
@@ -31,6 +33,8 @@ __all__ = [
     "FilesystemEntityRepository",
     "get_catalog_metadata",
     "import_seed_catalog",
+    "RobustEnsembleEntityExtractor",
+    "RobustEnsembleEntityExtractorConfig",
     "RuleBasedEntityExtractorConfig",
     "RuleBasedSentenceEntityExtractor",
     "SpacyFastCorefEntityExtractor",

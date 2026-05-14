@@ -7,7 +7,7 @@ from pathlib import Path
 
 from _pytest.monkeypatch import MonkeyPatch
 
-from ddd_policy_tracer.analysis.entities import RuleBasedSentenceEntityExtractor
+from ddd_policy_tracer.analysis.entities import RobustEnsembleEntityExtractor
 from ddd_policy_tracer.analysis.entities.run import (
     _build_parser,
     _configure_logging,
@@ -69,11 +69,11 @@ def test_build_parser_defaults_entity_extractor_version_from_env(
     assert args.extractor_version == "rules-test"
 
 
-def test_rule_based_extractor_default_wiring_type() -> None:
-    """Use deterministic rule-based extractor in entities run flow."""
-    extractor = RuleBasedSentenceEntityExtractor()
+def test_robust_ensemble_extractor_default_wiring_type() -> None:
+    """Use robust ensemble extractor as the only runtime strategy."""
+    extractor = RobustEnsembleEntityExtractor()
 
-    assert isinstance(extractor, RuleBasedSentenceEntityExtractor)
+    assert isinstance(extractor, RobustEnsembleEntityExtractor)
 
 
 def test_run_bulk_executes_entities_service_wiring_for_all_chunks(tmp_path: Path) -> None:
@@ -94,8 +94,8 @@ def test_run_bulk_executes_entities_service_wiring_for_all_chunks(tmp_path: Path
     reports = run_bulk(
         chunk_state_path=chunk_state_path,
         entity_state_path=entity_state_path,
-        extractor_kind="rule",
-        extractor_version="rules-v1",
+        extractor_kind="robust-ensemble",
+        extractor_version="robust-ensemble-v1",
     )
 
     assert len(reports) == 2
