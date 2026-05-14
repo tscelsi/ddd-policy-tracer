@@ -19,6 +19,7 @@ from .resolution import (
     ResolutionDecision,
     apply_resolution_decision,
 )
+from .review_queue import ReviewQueueWriteReport, SQLiteReviewQueueRepository
 from .retrieval import HybridCatalogRetriever, RetrievalCandidate, RetrievalResult
 from .ports import (
     ChunkRepository,
@@ -55,6 +56,8 @@ __all__ = [
     "EntityResolutionService",
     "ResolutionDecision",
     "apply_resolution_decision",
+    "ReviewQueueWriteReport",
+    "SQLiteReviewQueueRepository",
     "SpacyFastCorefEntityExtractor",
     "SpacyFastCorefEntityExtractorConfig",
 ]

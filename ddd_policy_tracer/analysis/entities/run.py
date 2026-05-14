@@ -24,6 +24,7 @@ from .extractors import (
 )
 from .models import EntityExtractionReport, EntityMention
 from .resolution import DeterministicEntityJudge, EntityResolutionService
+from .review_queue import SQLiteReviewQueueRepository
 from .retrieval import HybridCatalogRetriever
 from .service_layer import EntitiesService
 
@@ -37,6 +38,7 @@ def run(
     extractor_version: str = "robust-ensemble-v1",
     catalog_path: Path | None = None,
     vectors_path: Path | None = None,
+    review_db_path: Path | None = None,
 ) -> EntityExtractionReport:
     """Run one concrete entities extraction for a single chunk identifier."""
     service = _build_service(
@@ -46,6 +48,7 @@ def run(
         extractor_version=extractor_version,
         catalog_path=catalog_path,
         vectors_path=vectors_path,
+        review_db_path=review_db_path,
     )
     return service.extract_entities_for_chunk(chunk_id=chunk_id)
 
@@ -58,6 +61,7 @@ def run_bulk(
     extractor_version: str = "robust-ensemble-v1",
     catalog_path: Path | None = None,
     vectors_path: Path | None = None,
+    review_db_path: Path | None = None,
 ) -> list[EntityExtractionReport]:
     """Run entities extraction for all chunks available in one dataset."""
     service = _build_service(
@@ -67,6 +71,7 @@ def run_bulk(
         extractor_version=extractor_version,
         catalog_path=catalog_path,
         vectors_path=vectors_path,
+        review_db_path=review_db_path,
     )
     return service.extract_entities_for_all_chunks()
 
@@ -79,6 +84,7 @@ def _build_service(
     extractor_version: str,
     catalog_path: Path | None,
     vectors_path: Path | None,
+    review_db_path: Path | None,
 ) -> EntitiesService:
     """Build entities service dependencies from CLI configuration."""
     _ = extractor_kind
@@ -99,6 +105,11 @@ def _build_service(
         ),
     )
     if catalog_path is not None and vectors_path is not None:
+        review_repository = (
+            SQLiteReviewQueueRepository(sqlite_path=review_db_path)
+            if review_db_path is not None
+            else None
+        )
         extractor = _ResolvedEntityExtractor(
             mention_extractor=extractor,
             resolution_service=EntityResolutionService(
@@ -108,6 +119,7 @@ def _build_service(
                 ),
                 judge=DeterministicEntityJudge(),
             ),
+            review_repository=review_repository,
         )
 
     return EntitiesService(
@@ -126,24 +138,36 @@ class _ResolvedEntityExtractor:
         *,
         mention_extractor: RobustEnsembleEntityExtractor,
         resolution_service: EntityResolutionService,
+        review_repository: SQLiteReviewQueueRepository | None,
     ) -> None:
         """Store extractor collaborators for integrated resolution runs."""
         self._mention_extractor = mention_extractor
         self._resolution_service = resolution_service
+        self._review_repository = review_repository
 
     def extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
         """Extract and resolve mentions for one chunk payload."""
         mentions = self._mention_extractor.extract(chunk=chunk)
-        return self._resolution_service.resolve_mentions(mentions=mentions)
+        resolved = self._resolution_service.resolve_mentions(mentions=mentions)
+        self._enqueue_review_items(mentions=resolved)
+        return resolved
 
     def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
         """Extract and resolve mentions for many chunks in one pass."""
         mentions = self._mention_extractor.extract_many(chunks=chunks)
-        return self._resolution_service.resolve_mentions(mentions=mentions)
+        resolved = self._resolution_service.resolve_mentions(mentions=mentions)
+        self._enqueue_review_items(mentions=resolved)
+        return resolved
 
     def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
         """Delegate sentence counting to underlying mention extractor."""
         return self._mention_extractor.count_processed_sentences(chunk=chunk)
+
+    def _enqueue_review_items(self, *, mentions: list[EntityMention]) -> None:
+        """Persist unresolved resolution outcomes into review queue storage."""
+        if self._review_repository is None:
+            return
+        self._review_repository.enqueue_resolver_decisions(mentions=mentions)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -181,6 +205,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--vectors-path",
         default=None,
         help="Optional sidecar vectors path for entity resolution.",
+    )
+    parser.add_argument(
+        "--review-db-path",
+        default=None,
+        help="Optional SQLite review queue path for unresolved decisions.",
     )
     parser.add_argument(
         "--extractor",
@@ -226,6 +255,7 @@ def main() -> int:
             extractor_version=args.extractor_version,
             catalog_path=Path(args.catalog_path) if args.catalog_path is not None else None,
             vectors_path=Path(args.vectors_path) if args.vectors_path is not None else None,
+            review_db_path=Path(args.review_db_path) if args.review_db_path is not None else None,
         )
         summary = {
             "processed_chunks": len(reports),
@@ -247,6 +277,7 @@ def main() -> int:
         extractor_version=args.extractor_version,
         catalog_path=Path(args.catalog_path) if args.catalog_path is not None else None,
         vectors_path=Path(args.vectors_path) if args.vectors_path is not None else None,
+        review_db_path=Path(args.review_db_path) if args.review_db_path is not None else None,
     )
     sys.stdout.write(f"{report}\n")
     return 0
