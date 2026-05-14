@@ -11,6 +11,14 @@ from .extractors import (
     SpacyFastCorefEntityExtractorConfig,
 )
 from .models import EntityExtractionReport, EntityMention, EntityType
+from .resolution import (
+    CandidateEvidence,
+    DecisionStatus,
+    DeterministicEntityJudge,
+    EntityResolutionService,
+    ResolutionDecision,
+    apply_resolution_decision,
+)
 from .retrieval import HybridCatalogRetriever, RetrievalCandidate, RetrievalResult
 from .ports import (
     ChunkRepository,
@@ -41,6 +49,12 @@ __all__ = [
     "HybridCatalogRetriever",
     "RetrievalCandidate",
     "RetrievalResult",
+    "CandidateEvidence",
+    "DecisionStatus",
+    "DeterministicEntityJudge",
+    "EntityResolutionService",
+    "ResolutionDecision",
+    "apply_resolution_decision",
     "SpacyFastCorefEntityExtractor",
     "SpacyFastCorefEntityExtractorConfig",
 ]

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from ddd_policy_tracer.utils.events.local import LocalPublisher
+from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
 from .extractors import (
@@ -21,7 +22,9 @@ from .extractors import (
     SpacyFastCorefEntityExtractor,
     SpacyFastCorefEntityExtractorConfig,
 )
-from .models import EntityExtractionReport
+from .models import EntityExtractionReport, EntityMention
+from .resolution import DeterministicEntityJudge, EntityResolutionService
+from .retrieval import HybridCatalogRetriever
 from .service_layer import EntitiesService
 
 
@@ -32,6 +35,8 @@ def run(
     entity_state_path: Path,
     extractor_kind: Literal["robust-ensemble"] = "robust-ensemble",
     extractor_version: str = "robust-ensemble-v1",
+    catalog_path: Path | None = None,
+    vectors_path: Path | None = None,
 ) -> EntityExtractionReport:
     """Run one concrete entities extraction for a single chunk identifier."""
     service = _build_service(
@@ -39,6 +44,8 @@ def run(
         entity_state_path=entity_state_path,
         extractor_kind=extractor_kind,
         extractor_version=extractor_version,
+        catalog_path=catalog_path,
+        vectors_path=vectors_path,
     )
     return service.extract_entities_for_chunk(chunk_id=chunk_id)
 
@@ -49,6 +56,8 @@ def run_bulk(
     entity_state_path: Path,
     extractor_kind: Literal["robust-ensemble"] = "robust-ensemble",
     extractor_version: str = "robust-ensemble-v1",
+    catalog_path: Path | None = None,
+    vectors_path: Path | None = None,
 ) -> list[EntityExtractionReport]:
     """Run entities extraction for all chunks available in one dataset."""
     service = _build_service(
@@ -56,6 +65,8 @@ def run_bulk(
         entity_state_path=entity_state_path,
         extractor_kind=extractor_kind,
         extractor_version=extractor_version,
+        catalog_path=catalog_path,
+        vectors_path=vectors_path,
     )
     return service.extract_entities_for_all_chunks()
 
@@ -66,6 +77,8 @@ def _build_service(
     entity_state_path: Path,
     extractor_kind: Literal["robust-ensemble"],
     extractor_version: str,
+    catalog_path: Path | None,
+    vectors_path: Path | None,
 ) -> EntitiesService:
     """Build entities service dependencies from CLI configuration."""
     _ = extractor_kind
@@ -85,12 +98,52 @@ def _build_service(
             ),
         ),
     )
+    if catalog_path is not None and vectors_path is not None:
+        extractor = _ResolvedEntityExtractor(
+            mention_extractor=extractor,
+            resolution_service=EntityResolutionService(
+                retriever=HybridCatalogRetriever(
+                    catalog_path=catalog_path,
+                    vectors_path=vectors_path,
+                ),
+                judge=DeterministicEntityJudge(),
+            ),
+        )
+
     return EntitiesService(
         chunk_repository=FilesystemChunkRepository(chunk_state_path),
         entity_repository=FilesystemEntityRepository(entity_state_path),
         extractor=extractor,
         event_publisher=LocalPublisher(),
     )
+
+
+class _ResolvedEntityExtractor:
+    """Compose mention extraction with deterministic catalog resolution."""
+
+    def __init__(
+        self,
+        *,
+        mention_extractor: RobustEnsembleEntityExtractor,
+        resolution_service: EntityResolutionService,
+    ) -> None:
+        """Store extractor collaborators for integrated resolution runs."""
+        self._mention_extractor = mention_extractor
+        self._resolution_service = resolution_service
+
+    def extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
+        """Extract and resolve mentions for one chunk payload."""
+        mentions = self._mention_extractor.extract(chunk=chunk)
+        return self._resolution_service.resolve_mentions(mentions=mentions)
+
+    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
+        """Extract and resolve mentions for many chunks in one pass."""
+        mentions = self._mention_extractor.extract_many(chunks=chunks)
+        return self._resolution_service.resolve_mentions(mentions=mentions)
+
+    def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
+        """Delegate sentence counting to underlying mention extractor."""
+        return self._mention_extractor.count_processed_sentences(chunk=chunk)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -118,6 +171,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--entity-state-path",
         default="data/entities.jsonl",
         help="Path to entities JSONL state.",
+    )
+    parser.add_argument(
+        "--catalog-path",
+        default=None,
+        help="Optional runtime SQLite catalog path for entity resolution.",
+    )
+    parser.add_argument(
+        "--vectors-path",
+        default=None,
+        help="Optional sidecar vectors path for entity resolution.",
     )
     parser.add_argument(
         "--extractor",
@@ -161,6 +224,8 @@ def main() -> int:
             entity_state_path=entity_state_path,
             extractor_kind=args.extractor,
             extractor_version=args.extractor_version,
+            catalog_path=Path(args.catalog_path) if args.catalog_path is not None else None,
+            vectors_path=Path(args.vectors_path) if args.vectors_path is not None else None,
         )
         summary = {
             "processed_chunks": len(reports),
@@ -180,6 +245,8 @@ def main() -> int:
         entity_state_path=entity_state_path,
         extractor_kind=args.extractor,
         extractor_version=args.extractor_version,
+        catalog_path=Path(args.catalog_path) if args.catalog_path is not None else None,
+        vectors_path=Path(args.vectors_path) if args.vectors_path is not None else None,
     )
     sys.stdout.write(f"{report}\n")
     return 0
