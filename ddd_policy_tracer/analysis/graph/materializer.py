@@ -115,6 +115,7 @@ def materialize_graph_with_entities(
         claims_by_chunk.setdefault(claim.chunk_id, []).append(claim)
 
     canonical_links_by_claim_id: dict[str, set[str]] = {}
+    weighted_links_by_claim_id: dict[str, dict[str, float]] = {}
     for claim in claims:
         linked_entities = claim.linked_entities or []
         linked_keys = {
@@ -123,6 +124,28 @@ def materialize_graph_with_entities(
             if isinstance(linked, dict) and isinstance(linked.get("canonical_entity_key"), str)
         }
         canonical_links_by_claim_id[claim.claim_id] = linked_keys
+        weighted_links: dict[str, float] = {}
+        for linked in linked_entities:
+            if not isinstance(linked, dict):
+                continue
+            key = linked.get("canonical_entity_key")
+            confidence = linked.get("link_confidence")
+            if not isinstance(key, str):
+                continue
+            if isinstance(confidence, (int, float)):
+                weighted_links[key] = float(confidence)
+                continue
+            weighted_links.setdefault(key, 1.0)
+        for pending in claim.pending_entity_links or []:
+            if not isinstance(pending, dict):
+                continue
+            for candidate in _candidate_links_from_pending(pending):
+                existing = weighted_links.get(candidate["canonical_entity_key"], 0.0)
+                weighted_links[candidate["canonical_entity_key"]] = max(
+                    existing,
+                    candidate["confidence_score"],
+                )
+        weighted_links_by_claim_id[claim.claim_id] = weighted_links
 
     for entity in entities:
         normalized_value = (
@@ -152,14 +175,31 @@ def materialize_graph_with_entities(
         chunk_claims = claims_by_chunk.get(entity.chunk_id, [])
         for claim in chunk_claims:
             linked_keys = canonical_links_by_claim_id.get(claim.claim_id, set())
-            if linked_keys and entity.canonical_entity_key not in linked_keys:
+            weighted_links = weighted_links_by_claim_id.get(claim.claim_id, {})
+            if (
+                linked_keys
+                and entity.canonical_entity_key not in linked_keys
+                and entity.canonical_entity_key not in weighted_links
+            ):
                 continue
             if not _entity_matches_claim_text(
                 claim=claim,
                 entity=entity,
-                has_explicit_link=bool(linked_keys),
+                has_explicit_link=(
+                    bool(linked_keys)
+                    and entity.canonical_entity_key in linked_keys
+                )
+                or (
+                    entity.canonical_entity_key is not None
+                    and entity.canonical_entity_key in weighted_links
+                ),
             ):
                 continue
+
+            link_confidence = _resolve_link_confidence(
+                entity=entity,
+                weighted_links=weighted_links,
+            )
 
             mentions_edge_id = _edge_id(
                 edge_type="MENTIONS",
@@ -187,6 +227,7 @@ def materialize_graph_with_entities(
                         "entity_mention_text": entity.mention_text,
                         "normalized_mention_text": entity.normalized_mention_text,
                         "entity_confidence": entity.confidence,
+                        "link_confidence": link_confidence,
                         "claim_confidence": claim.confidence,
                         "link_method": "chunk_cooccurrence_text_match",
                     },
@@ -261,3 +302,53 @@ def _normalize_for_match(value: str) -> str:
     lowered = value.lower()
     no_punctuation = re.sub(r"[^a-z0-9\s]", " ", lowered)
     return " ".join(no_punctuation.split())
+
+
+def _resolve_link_confidence(*, entity: EntityRecord, weighted_links: dict[str, float]) -> float:
+    """Resolve one link confidence value for entity->claim mentions edge."""
+    if entity.canonical_entity_key is not None and entity.canonical_entity_key in weighted_links:
+        return weighted_links[entity.canonical_entity_key]
+    if entity.candidate_links:
+        top = _top_candidate_confidence(entity.candidate_links)
+        if top is not None:
+            return top
+    return float(entity.confidence)
+
+
+def _top_candidate_confidence(candidate_links: list[dict[str, object]]) -> float | None:
+    """Return top confidence among candidate links on one entity record."""
+    top: float | None = None
+    for candidate in candidate_links:
+        if not isinstance(candidate, dict):
+            continue
+        confidence = candidate.get("confidence_score")
+        if not isinstance(confidence, (int, float)):
+            continue
+        score = float(confidence)
+        if top is None or score > top:
+            top = score
+    return top
+
+
+def _candidate_links_from_pending(pending: dict[str, object]) -> list[dict[str, float | str]]:
+    """Extract candidate-link confidence records from one pending link payload."""
+    raw = pending.get("candidate_links")
+    if not isinstance(raw, list):
+        return []
+    links: list[dict[str, float | str]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("canonical_entity_key")
+        confidence = entry.get("confidence_score")
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if not isinstance(confidence, (int, float)):
+            continue
+        links.append(
+            {
+                "canonical_entity_key": key,
+                "confidence_score": float(confidence),
+            },
+        )
+    return links

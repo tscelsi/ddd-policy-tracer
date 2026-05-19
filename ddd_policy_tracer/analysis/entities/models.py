@@ -7,6 +7,12 @@ from typing import Literal
 
 EntityType = Literal["POLICY", "ORG", "PERSON", "JURISDICTION", "PROGRAM"]
 
+CATALOG_ELIGIBLE_ENTITY_TYPES: tuple[EntityType, ...] = (
+    "ORG",
+    "PERSON",
+    "JURISDICTION",
+)
+
 
 @dataclass(frozen=True)
 class EntityMention:

@@ -28,6 +28,7 @@ def _entity_row(
     normalized_mention_text: str,
     decision_status: str = "linked",
     decision_score: float = 0.9,
+    candidate_links: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Build one source entity row for canonicalization fixtures."""
     return {
@@ -48,6 +49,18 @@ def _entity_row(
             "decision_status": decision_status,
             "decision_score": decision_score,
             "selected_candidate_key": "entity_canon_selected",
+            "candidate_links": candidate_links
+            if candidate_links is not None
+            else [
+                {
+                    "canonical_entity_key": "entity_canon_selected",
+                    "entity_type": "ORG",
+                    "canonical_name": "australia institute",
+                    "confidence_score": 0.91,
+                    "lexical_score": 0.9,
+                    "vector_score": 0.92,
+                },
+            ],
         },
     }
 
@@ -119,6 +132,7 @@ def test_run_entities_writes_canonical_rows_with_deterministic_key(tmp_path: Pat
     assert rows[0]["canonical_name"] == "australia institute"
     assert rows[0]["canonicalization"]["stage"] == "entity"
     assert rows[0]["canonicalization"]["canonicalizer_version"] == "entity-v1"
+    assert rows[0]["candidate_links"][0]["confidence_score"] == 0.91
 
 
 def test_run_claims_links_entities_by_span_then_text_fallback(tmp_path: Path) -> None:

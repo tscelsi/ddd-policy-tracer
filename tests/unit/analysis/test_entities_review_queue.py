@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from ddd_policy_tracer.analysis.entities import EntityMention
@@ -25,6 +26,7 @@ def _mention(*, entity_id: str, status: str) -> EntityMention:
         extractor_version="robust-ensemble-v1",
         metadata={
             "decision_status": status,
+            "catalog_eligible": True,
             "decision_score": 0.7,
             "reason_codes": ["threshold_review"],
             "selected_candidate_key": None,
@@ -79,3 +81,106 @@ def test_review_queue_ignores_linked_mentions(tmp_path: Path) -> None:
     assert report.queued_items == 0
     assert report.appended_events == 0
     assert repository.list_review_items() == []
+
+
+def test_review_queue_ignores_catalog_ineligible_mentions(tmp_path: Path) -> None:
+    """Skip queue insertion when mention is ineligible for catalog curation."""
+    repository = SQLiteReviewQueueRepository(sqlite_path=tmp_path / "review.db")
+    ineligible = replace(
+        _mention(entity_id="entity_1", status="new_candidate"),
+        metadata={
+            "decision_status": "new_candidate",
+            "catalog_eligible": False,
+            "decision_score": 0.2,
+            "reason_codes": ["catalog_ineligible"],
+            "selected_candidate_key": None,
+            "top_candidates": [],
+        },
+    )
+
+    report = repository.enqueue_resolver_decisions(mentions=[ineligible])
+
+    assert report.queued_items == 0
+    assert report.appended_events == 0
+    assert repository.list_review_items() == []
+
+
+def test_review_decision_approves_item_and_sets_canonical_fields(tmp_path: Path) -> None:
+    """Store explicit approval decision and canonical field overrides."""
+    repository = SQLiteReviewQueueRepository(sqlite_path=tmp_path / "review.db")
+    mention = _mention(entity_id="entity_1", status="needs_review")
+    repository.enqueue_resolver_decisions(mentions=[mention])
+
+    report = repository.decide_item(
+        mention_entity_id="entity_1",
+        decision="approved",
+        canonical_entity_key="policy:clean-energy-act",
+        canonical_name="Clean Energy Act",
+        entity_type="POLICY",
+        aliases=["The Clean Energy Act", "CEA"],
+    )
+
+    assert report.review_state == "approved"
+    items = repository.list_review_items(state="approved")
+    assert len(items) == 1
+    assert items[0]["canonical_entity_key"] == "policy:clean-energy-act"
+    assert items[0]["canonical_name"] == "Clean Energy Act"
+    assert "CEA" in items[0]["canonical_aliases"]
+
+
+def test_auto_approve_obvious_only_promotes_high_confidence_pending_items(tmp_path: Path) -> None:
+    """Automatically approve only pending obvious candidates by gates."""
+    repository = SQLiteReviewQueueRepository(sqlite_path=tmp_path / "review.db")
+    strong = replace(
+        _mention(entity_id="entity_1", status="needs_review"),
+        metadata={
+            "decision_status": "needs_review",
+            "decision_score": 0.95,
+            "reason_codes": ["threshold_review"],
+            "top_candidates": [
+                {
+                    "canonical_entity_key": "policy:clean-energy-act",
+                    "canonical_name": "Clean Energy Act",
+                    "entity_type": "POLICY",
+                    "fused_score": 0.95,
+                },
+                {
+                    "canonical_entity_key": "policy:other",
+                    "canonical_name": "Other",
+                    "entity_type": "POLICY",
+                    "fused_score": 0.70,
+                },
+            ],
+        },
+    )
+    weak = replace(
+        _mention(entity_id="entity_2", status="needs_review"),
+        metadata={
+            "decision_status": "needs_review",
+            "decision_score": 0.65,
+            "reason_codes": ["threshold_review"],
+            "top_candidates": [
+                {
+                    "canonical_entity_key": "policy:clean-energy-act",
+                    "canonical_name": "Clean Energy Act",
+                    "entity_type": "POLICY",
+                    "fused_score": 0.65,
+                },
+                {
+                    "canonical_entity_key": "policy:other",
+                    "canonical_name": "Other",
+                    "entity_type": "POLICY",
+                    "fused_score": 0.62,
+                },
+            ],
+        },
+    )
+    repository.enqueue_resolver_decisions(mentions=[strong, weak])
+
+    report = repository.auto_approve_obvious(min_score=0.93, min_margin=0.15)
+
+    assert report.considered_items == 2
+    assert report.auto_approved_items == 1
+    auto_items = repository.list_review_items(state="auto_approved")
+    assert len(auto_items) == 1
+    assert auto_items[0]["mention_entity_id"] == "entity_1"

@@ -10,6 +10,7 @@ from ddd_policy_tracer.analysis.claims.models import ClaimCandidate
 from ddd_policy_tracer.analysis.entities.models import EntityMention
 
 from .models import (
+    CandidateLinkRecord,
     CanonicalClaimRecord,
     CanonicalEntityRecord,
     CanonicalizationMetadata,
@@ -57,7 +58,11 @@ def canonicalize_entities(
 
     for entity in entities:
         canonical_name = _canonicalize_entity_name(entity.normalized_mention_text)
-        canonical_entity_key = _build_canonical_entity_key(
+        candidate_links = _candidate_links_from_metadata(entity)
+        selected_candidate_key = _selected_candidate_key_from_metadata(entity)
+        canonical_entity_key = _resolve_canonical_entity_key(
+            selected_candidate_key=selected_candidate_key,
+            candidate_links=candidate_links,
             entity_type=entity.entity_type,
             canonical_name=canonical_name,
         )
@@ -79,7 +84,8 @@ def canonicalize_entities(
                 canonical_entity_key=canonical_entity_key,
                 decision_status=_decision_status_from_metadata(entity),
                 decision_score=_decision_score_from_metadata(entity),
-                selected_candidate_key=_selected_candidate_key_from_metadata(entity),
+                selected_candidate_key=selected_candidate_key,
+                candidate_links=candidate_links,
                 canonicalization=metadata,
             ),
         )
@@ -132,6 +138,7 @@ def canonicalize_claims(
                 decision_score=_decision_score_for_entity(linked.entity_id, chunk_entities),
                 entity_id=linked.entity_id,
                 evidence=linked.evidence,
+                candidate_links=_candidate_links_for_entity(linked.entity_id, chunk_entities),
             )
             for linked in linked_entities
             if _decision_status_for_entity(linked.entity_id, chunk_entities)
@@ -176,8 +183,18 @@ def _canonicalize_entity_name(value: str) -> str:
     return collapsed
 
 
-def _build_canonical_entity_key(*, entity_type: str, canonical_name: str) -> str:
-    """Build deterministic canonical entity key from stable inputs."""
+def _resolve_canonical_entity_key(
+    *,
+    selected_candidate_key: str | None,
+    candidate_links: list[CandidateLinkRecord] | None,
+    entity_type: str,
+    canonical_name: str,
+) -> str:
+    """Resolve canonical key from selected/retrieved candidates or fallback."""
+    if selected_candidate_key is not None and selected_candidate_key.strip():
+        return selected_candidate_key
+    if candidate_links:
+        return candidate_links[0].canonical_entity_key
     raw = f"{entity_type}|{canonical_name}"
     digest = sha256(raw.encode("utf-8")).hexdigest()[:16]
     return f"entity_canon_{digest}"
@@ -211,6 +228,7 @@ def _link_entities_for_claim(
                         entity_span=(entity.start_char, entity.end_char),
                         matched_text=None,
                     ),
+                    link_confidence=_link_confidence_for_entity(entity),
                 ),
             )
             linked_entity_ids.add(entity.entity_id)
@@ -234,6 +252,7 @@ def _link_entities_for_claim(
                     entity_span=(entity.start_char, entity.end_char),
                     matched_text=entity.normalized_mention_text,
                 ),
+                link_confidence=_link_confidence_for_entity(entity),
             ),
         )
         linked_entity_ids.add(entity.entity_id)
@@ -276,6 +295,51 @@ def _selected_candidate_key_from_metadata(entity: EntityMention) -> str | None:
     return str(value) if isinstance(value, str) else None
 
 
+def _candidate_links_from_metadata(entity: EntityMention) -> list[CandidateLinkRecord] | None:
+    """Read probabilistic candidate links from mention metadata."""
+    metadata = entity.metadata or {}
+    raw = metadata.get("candidate_links")
+    if not isinstance(raw, list):
+        return None
+    links: list[CandidateLinkRecord] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("canonical_entity_key")
+        entity_type = entry.get("entity_type")
+        canonical_name = entry.get("canonical_name")
+        confidence = entry.get("confidence_score")
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if not isinstance(entity_type, str) or not entity_type.strip():
+            continue
+        if not isinstance(canonical_name, str) or not canonical_name.strip():
+            continue
+        if not isinstance(confidence, (int, float)):
+            continue
+        links.append(
+            CandidateLinkRecord(
+                canonical_entity_key=key,
+                entity_type=entity_type,
+                canonical_name=canonical_name,
+                confidence_score=float(confidence),
+                lexical_score=(
+                    float(entry.get("lexical_score"))
+                    if isinstance(entry.get("lexical_score"), (int, float))
+                    else None
+                ),
+                vector_score=(
+                    float(entry.get("vector_score"))
+                    if isinstance(entry.get("vector_score"), (int, float))
+                    else None
+                ),
+            ),
+        )
+    if not links:
+        return None
+    return sorted(links, key=lambda link: link.confidence_score, reverse=True)
+
+
 def _decision_status_for_entity(entity_id: str, entities: list[CanonicalEntityRecord]) -> str:
     """Resolve decision status for one canonical entity identity."""
     for entity in entities:
@@ -284,9 +348,27 @@ def _decision_status_for_entity(entity_id: str, entities: list[CanonicalEntityRe
     return "linked"
 
 
+def _candidate_links_for_entity(
+    entity_id: str,
+    entities: list[CanonicalEntityRecord],
+) -> list[CandidateLinkRecord] | None:
+    """Resolve candidate links for one canonical entity row by id."""
+    for entity in entities:
+        if entity.entity_id == entity_id:
+            return entity.candidate_links
+    return None
+
+
 def _decision_score_for_entity(entity_id: str, entities: list[CanonicalEntityRecord]) -> float | None:
     """Resolve decision score for one canonical entity identity."""
     for entity in entities:
         if entity.entity_id == entity_id:
             return entity.decision_score
     return None
+
+
+def _link_confidence_for_entity(entity: CanonicalEntityRecord) -> float | None:
+    """Resolve best confidence for one linked entity edge."""
+    if entity.candidate_links:
+        return entity.candidate_links[0].confidence_score
+    return entity.decision_score

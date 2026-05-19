@@ -17,7 +17,7 @@ from .contracts import (
     GraphThresholds,
 )
 from .filtering import build_filtered_graph
-from .materializer import materialize_graph_with_entities
+from .materializer import MaterializedGraph, materialize_graph_with_entities
 from .repositories import JsonlClaimRepository, JsonlEntityRepository
 from .sinks import GraphSink, JsonArtifactSink
 from .validation import collect_input_anomalies
@@ -61,6 +61,11 @@ def scaffold_graph_artifacts(
     claims = claim_repository.list_claims(source_id=source_id)
     entities = entity_repository.list_entities(source_id=source_id)
     materialized = materialize_graph_with_entities(claims=claims, entities=entities)
+    if thresholds.entity_link_confidence_min > 0.0:
+        materialized = _filter_mentions_edges_by_link_confidence(
+            graph=materialized,
+            min_confidence=thresholds.entity_link_confidence_min,
+        )
 
     stats = {
         "chunks_input_rows": _count_jsonl_rows(chunks_path),
@@ -165,3 +170,34 @@ def _prune_old_run_directories(*, output_root: Path, keep_latest: int) -> None:
     )
     for stale_directory in run_directories[keep_latest:]:
         shutil.rmtree(stale_directory)
+
+
+def _filter_mentions_edges_by_link_confidence(
+    *,
+    graph: MaterializedGraph,
+    min_confidence: float,
+) -> MaterializedGraph:
+    """Filter mentions edges below link-confidence threshold and prune orphans."""
+    edges = []
+    for edge in graph.edges:
+        if edge.type != "MENTIONS":
+            edges.append(edge)
+            continue
+        confidence_raw = edge.properties.get("link_confidence")
+        confidence = float(confidence_raw) if isinstance(confidence_raw, (int, float)) else 0.0
+        if confidence >= min_confidence:
+            edges.append(edge)
+
+    connected_claims = {edge.source for edge in edges if edge.type == "MENTIONS"}
+    connected_entities = {edge.target for edge in edges if edge.type == "MENTIONS"}
+    connected_publishers = {
+        edge.source for edge in edges if edge.type == "RAISED" and edge.target in connected_claims
+    }
+    selected_ids = connected_claims | connected_entities | connected_publishers
+    nodes = [node for node in graph.nodes if node.id in selected_ids or node.type == "PublisherOrganization"]
+
+    stats = dict(graph.stats)
+    stats["mentions_edges"] = sum(1 for edge in edges if edge.type == "MENTIONS")
+    stats["mentioned_entity_nodes"] = sum(1 for node in nodes if node.type == "MentionedEntity")
+    stats["claim_nodes"] = sum(1 for node in nodes if node.type == "Claim")
+    return MaterializedGraph(nodes=nodes, edges=edges, stats=stats)

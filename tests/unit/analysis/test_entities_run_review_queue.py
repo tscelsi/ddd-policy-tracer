@@ -48,7 +48,7 @@ def test_run_enqueues_unresolved_mentions_in_review_queue(tmp_path: Path) -> Non
     _write_chunk(
         chunk_state,
         chunk_id="chunk_1",
-        text="The Clean Energy Act should reduce emissions.",
+        text="The Australia Institute should reduce emissions.",
     )
     _write_seed(seed_path)
     import_seed_catalog(

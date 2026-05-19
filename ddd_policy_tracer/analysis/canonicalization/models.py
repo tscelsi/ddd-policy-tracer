@@ -7,6 +7,18 @@ from typing import Literal
 
 
 @dataclass(frozen=True)
+class CandidateLinkRecord:
+    """Represent one probabilistic candidate link for an entity mention."""
+
+    canonical_entity_key: str
+    entity_type: str
+    canonical_name: str
+    confidence_score: float
+    lexical_score: float | None = None
+    vector_score: float | None = None
+
+
+@dataclass(frozen=True)
 class CanonicalizationMetadata:
     """Record canonicalization run metadata embedded in each row."""
 
@@ -38,6 +50,7 @@ class CanonicalEntityRecord:
     decision_status: str | None = None
     decision_score: float | None = None
     selected_candidate_key: str | None = None
+    candidate_links: list[CandidateLinkRecord] | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +72,7 @@ class LinkedEntityRecord:
     link_method: Literal["span_overlap", "text_match_fallback"]
     entity_id: str
     evidence: LinkedEntityEvidence | None
+    link_confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +86,7 @@ class PendingEntityLinkRecord:
     decision_score: float | None
     entity_id: str
     evidence: LinkedEntityEvidence | None
+    candidate_links: list[CandidateLinkRecord] | None = None
 
 
 @dataclass(frozen=True)

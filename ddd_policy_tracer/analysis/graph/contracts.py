@@ -14,6 +14,7 @@ class GraphThresholds:
 
     claim_confidence_min: float = 0.6
     entity_confidence_min: float = 0.7
+    entity_link_confidence_min: float = 0.5
 
 
 @dataclass(frozen=True)

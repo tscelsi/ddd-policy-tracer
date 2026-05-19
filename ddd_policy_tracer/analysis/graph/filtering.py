@@ -83,6 +83,7 @@ def _qualifies_mentions_edge(
     return (
         claim_confidence >= thresholds.claim_confidence_min
         and entity_confidence >= thresholds.entity_confidence_min
+        and _as_float(edge.properties.get("link_confidence")) >= thresholds.entity_link_confidence_min
     )
 
 

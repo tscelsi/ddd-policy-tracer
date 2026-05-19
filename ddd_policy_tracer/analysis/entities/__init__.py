@@ -1,16 +1,28 @@
 """Public exports for entities bounded context."""
 
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
-from .catalog import CatalogImportReport, get_catalog_metadata, import_seed_catalog
+from .catalog import (
+    CatalogImportReport,
+    CatalogPromotionReport,
+    get_catalog_metadata,
+    import_seed_catalog,
+    promote_review_items,
+)
 from .extractors import (
     RobustEnsembleEntityExtractor,
     RobustEnsembleEntityExtractorConfig,
     RuleBasedEntityExtractorConfig,
     RuleBasedSentenceEntityExtractor,
-    SpacyFastCorefEntityExtractor,
-    SpacyFastCorefEntityExtractorConfig,
+    SpacyEntityExtractor,
+    SpacyEntityExtractorConfig,
 )
 from .models import EntityExtractionReport, EntityMention, EntityType
+from .ports import (
+    ChunkRepository,
+    EntityExtractor,
+    EntityRepository,
+    EventPublisher,
+)
 from .resolution import (
     CandidateEvidence,
     DecisionStatus,
@@ -19,45 +31,50 @@ from .resolution import (
     ResolutionDecision,
     apply_resolution_decision,
 )
-from .review_queue import ReviewQueueWriteReport, SQLiteReviewQueueRepository
 from .retrieval import HybridCatalogRetriever, RetrievalCandidate, RetrievalResult
-from .ports import (
-    ChunkRepository,
-    EntityExtractor,
-    EntityRepository,
-    EventPublisher,
+from .review_queue import (
+    AutoApprovalReport,
+    PromotionCandidate,
+    ReviewDecisionReport,
+    ReviewQueueWriteReport,
+    SQLiteReviewQueueRepository,
 )
 from .service_layer import EntitiesService
 
 __all__ = [
-    "ChunkRepository",
+    "AutoApprovalReport",
+    "CandidateEvidence",
     "CatalogImportReport",
+    "CatalogPromotionReport",
+    "ChunkRepository",
+    "DecisionStatus",
+    "DeterministicEntityJudge",
     "EntitiesService",
     "EntityExtractionReport",
     "EntityExtractor",
     "EntityMention",
     "EntityRepository",
+    "EntityResolutionService",
     "EntityType",
     "EventPublisher",
     "FilesystemChunkRepository",
     "FilesystemEntityRepository",
-    "get_catalog_metadata",
-    "import_seed_catalog",
+    "HybridCatalogRetriever",
+    "PromotionCandidate",
+    "ResolutionDecision",
+    "RetrievalCandidate",
+    "RetrievalResult",
+    "ReviewDecisionReport",
+    "ReviewQueueWriteReport",
     "RobustEnsembleEntityExtractor",
     "RobustEnsembleEntityExtractorConfig",
     "RuleBasedEntityExtractorConfig",
     "RuleBasedSentenceEntityExtractor",
-    "HybridCatalogRetriever",
-    "RetrievalCandidate",
-    "RetrievalResult",
-    "CandidateEvidence",
-    "DecisionStatus",
-    "DeterministicEntityJudge",
-    "EntityResolutionService",
-    "ResolutionDecision",
-    "apply_resolution_decision",
-    "ReviewQueueWriteReport",
     "SQLiteReviewQueueRepository",
-    "SpacyFastCorefEntityExtractor",
-    "SpacyFastCorefEntityExtractorConfig",
+    "SpacyEntityExtractor",
+    "SpacyEntityExtractorConfig",
+    "apply_resolution_decision",
+    "get_catalog_metadata",
+    "import_seed_catalog",
+    "promote_review_items",
 ]

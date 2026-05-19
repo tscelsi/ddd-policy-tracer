@@ -11,6 +11,7 @@ from ddd_policy_tracer.analysis.claims.models import ClaimCandidate
 from ddd_policy_tracer.analysis.entities.models import EntityMention
 
 from .models import (
+    CandidateLinkRecord,
     CanonicalClaimRecord,
     CanonicalEntityRecord,
     CanonicalizationMetadata,
@@ -175,6 +176,9 @@ def _canonical_entity_to_payload(row: CanonicalEntityRecord) -> dict[str, object
         "decision_status": row.decision_status,
         "decision_score": row.decision_score,
         "selected_candidate_key": row.selected_candidate_key,
+        "candidate_links": [
+            _candidate_link_to_payload(link) for link in (row.candidate_links or [])
+        ],
         "canonicalization": _canonicalization_metadata_to_payload(row.canonicalization),
     }
 
@@ -216,6 +220,7 @@ def _payload_to_canonical_entity(payload: dict[str, object]) -> CanonicalEntityR
             if isinstance(payload.get("selected_candidate_key"), str)
             else None
         ),
+        candidate_links=_candidate_links_from_payload(payload.get("candidate_links")),
     )
 
 
@@ -291,6 +296,9 @@ def _pending_entity_link_to_payload(pending: PendingEntityLinkRecord) -> dict[st
         "decision_status": pending.decision_status,
         "decision_score": pending.decision_score,
         "entity_id": pending.entity_id,
+        "candidate_links": [
+            _candidate_link_to_payload(link) for link in (pending.candidate_links or [])
+        ],
     }
     if pending.evidence is not None:
         payload["evidence"] = {
@@ -309,6 +317,7 @@ def _linked_entity_to_payload(linked: LinkedEntityRecord) -> dict[str, object]:
         "canonical_name": linked.canonical_name,
         "link_method": linked.link_method,
         "entity_id": linked.entity_id,
+        "link_confidence": linked.link_confidence,
     }
     if linked.evidence is not None:
         payload["evidence"] = {
@@ -349,6 +358,7 @@ def _pending_entity_from_payload(payload: dict[str, object]) -> PendingEntityLin
         ),
         entity_id=str(payload["entity_id"]),
         evidence=evidence,
+        candidate_links=_candidate_links_from_payload(payload.get("candidate_links")),
     )
 
 
@@ -455,4 +465,62 @@ def linked_entity_from_payload(payload: dict[str, object]) -> LinkedEntityRecord
         link_method=cast(Literal["span_overlap", "text_match_fallback"], link_method),
         entity_id=str(payload["entity_id"]),
         evidence=evidence,
+        link_confidence=(
+            float(payload.get("link_confidence"))
+            if isinstance(payload.get("link_confidence"), (int, float))
+            else None
+        ),
     )
+
+
+def _candidate_link_to_payload(link: CandidateLinkRecord) -> dict[str, object]:
+    """Serialize one candidate link record to JSON payload."""
+    return {
+        "canonical_entity_key": link.canonical_entity_key,
+        "entity_type": link.entity_type,
+        "canonical_name": link.canonical_name,
+        "confidence_score": link.confidence_score,
+        "lexical_score": link.lexical_score,
+        "vector_score": link.vector_score,
+    }
+
+
+def _candidate_links_from_payload(payload: object) -> list[CandidateLinkRecord] | None:
+    """Deserialize candidate link payloads into typed link records."""
+    if not isinstance(payload, list):
+        return None
+    links: list[CandidateLinkRecord] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("canonical_entity_key")
+        entity_type = entry.get("entity_type")
+        canonical_name = entry.get("canonical_name")
+        confidence = entry.get("confidence_score")
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if not isinstance(entity_type, str) or not entity_type.strip():
+            continue
+        if not isinstance(canonical_name, str) or not canonical_name.strip():
+            continue
+        if not isinstance(confidence, (int, float)):
+            continue
+        links.append(
+            CandidateLinkRecord(
+                canonical_entity_key=key,
+                entity_type=entity_type,
+                canonical_name=canonical_name,
+                confidence_score=float(confidence),
+                lexical_score=(
+                    float(entry.get("lexical_score"))
+                    if isinstance(entry.get("lexical_score"), (int, float))
+                    else None
+                ),
+                vector_score=(
+                    float(entry.get("vector_score"))
+                    if isinstance(entry.get("vector_score"), (int, float))
+                    else None
+                ),
+            ),
+        )
+    return links

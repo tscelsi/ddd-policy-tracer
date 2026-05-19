@@ -45,6 +45,7 @@ class EntityRecord:
     extractor_version: str
     canonical_entity_key: str | None
     canonical_name: str | None = None
+    candidate_links: list[dict[str, object]] | None = None
 
 
 class EntityRepository:
@@ -192,6 +193,14 @@ def _payload_to_entity(payload: dict[str, object]) -> EntityRecord:
     )
     canonical_key = payload.get("canonical_entity_key")
     canonical_name = payload.get("canonical_name")
+    candidate_links_payload = payload.get("candidate_links")
+    candidate_links: list[dict[str, object]] | None = None
+    if isinstance(candidate_links_payload, list):
+        extracted_links: list[dict[str, object]] = []
+        for entry in candidate_links_payload:
+            if isinstance(entry, dict):
+                extracted_links.append(entry)
+        candidate_links = extracted_links
     return EntityRecord(
         entity_id=str(payload["entity_id"]),
         chunk_id=str(payload["chunk_id"]),
@@ -207,6 +216,7 @@ def _payload_to_entity(payload: dict[str, object]) -> EntityRecord:
         extractor_version=str(payload["extractor_version"]),
         canonical_entity_key=canonical_key if canonical_key is None else str(canonical_key),
         canonical_name=canonical_name if canonical_name is None else str(canonical_name),
+        candidate_links=candidate_links,
     )
 
 

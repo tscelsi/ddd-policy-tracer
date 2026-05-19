@@ -449,6 +449,7 @@ def test_run_writes_filtered_connected_triads_with_default_thresholds(tmp_path: 
     assert filtered_claim_ids == {"claim-1"}
     assert filtered_payload["thresholds"]["claim_confidence_min"] == 0.6
     assert filtered_payload["thresholds"]["entity_confidence_min"] == 0.7
+    assert filtered_payload["thresholds"]["entity_link_confidence_min"] == 0.5
 
 
 def test_run_applies_override_thresholds_to_filtered_graph(tmp_path: Path) -> None:
@@ -736,3 +737,72 @@ def test_run_links_mentions_using_claim_linked_entities_when_present(tmp_path: P
     graph_payload = json.loads((result.run_directory / "graph.json").read_text(encoding="utf-8"))
     mentions_edges = [edge for edge in graph_payload["edges"] if edge["type"] == "MENTIONS"]
     assert len(mentions_edges) == 1
+
+
+def test_run_uses_pending_candidate_links_as_weighted_mentions(tmp_path: Path) -> None:
+    """Create weighted mentions edges from pending candidate link confidence."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    claims_path = tmp_path / "claims.jsonl"
+    entities_path = tmp_path / "entities_canonical.jsonl"
+    output_root = tmp_path / "graph_runs"
+    _write_jsonl(chunks_path, [{"chunk_id": "chunk-1"}])
+    _write_jsonl(
+        claims_path,
+        [
+            {
+                **_claim_row(
+                    claim_id="claim-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                ),
+                "pending_entity_links": [
+                    {
+                        "canonical_entity_key": "org:australia-institute",
+                        "entity_type": "ORG",
+                        "canonical_name": "australia institute",
+                        "decision_status": "needs_review",
+                        "decision_score": 0.8,
+                        "entity_id": "entity-1",
+                        "candidate_links": [
+                            {
+                                "canonical_entity_key": "org:australia-institute",
+                                "entity_type": "ORG",
+                                "canonical_name": "australia institute",
+                                "confidence_score": 0.93,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    )
+    _write_jsonl(
+        entities_path,
+        [
+            {
+                **_entity_row(
+                    entity_id="entity-1",
+                    chunk_id="chunk-1",
+                    source_id="australia_institute",
+                    mention_text="Australia Institute",
+                    normalized_mention_text="australia institute",
+                    entity_type="ORG",
+                ),
+                "canonical_entity_key": "org:australia-institute",
+                "canonical_name": "australia institute",
+            },
+        ],
+    )
+
+    result = run(
+        chunks_path=chunks_path,
+        claims_path=claims_path,
+        entities_path=entities_path,
+        output_root=output_root,
+        entity_link_confidence_min=0.9,
+    )
+
+    graph_payload = json.loads((result.run_directory / "graph.json").read_text(encoding="utf-8"))
+    mentions_edges = [edge for edge in graph_payload["edges"] if edge["type"] == "MENTIONS"]
+    assert len(mentions_edges) == 1
+    assert mentions_edges[0]["properties"]["link_confidence"] == 0.93

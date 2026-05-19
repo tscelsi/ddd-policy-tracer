@@ -9,8 +9,8 @@ import pytest
 
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 from ddd_policy_tracer.analysis.entities import (
-    SpacyFastCorefEntityExtractor,
-    SpacyFastCorefEntityExtractorConfig,
+    SpacyEntityExtractor,
+    SpacyEntityExtractorConfig,
 )
 from ddd_policy_tracer.analysis.entities import extractors as entity_extractors_module
 
@@ -146,8 +146,8 @@ def test_spacy_fastcoref_extractor_maps_entities_and_coref_key() -> None:
         ],
     )
 
-    extractor = SpacyFastCorefEntityExtractor(
-        config=SpacyFastCorefEntityExtractorConfig(extractor_version="spacy-fastcoref-v1"),
+    extractor = SpacyEntityExtractor(
+        config=SpacyEntityExtractorConfig(extractor_version="spacy-fastcoref-v1"),
         nlp=StubNlp(doc),
     )
 
@@ -166,7 +166,7 @@ def test_spacy_fastcoref_extractor_counts_spacy_sentences() -> None:
     """Count processed sentences from spaCy-like sentence segmentation."""
     text = "One sentence. Two sentences?"
     doc = StubDoc(ents=[], sentences=["One sentence.", "Two sentences?"], clusters=[])
-    extractor = SpacyFastCorefEntityExtractor(nlp=StubNlp(doc))
+    extractor = SpacyEntityExtractor(nlp=StubNlp(doc))
 
     processed_sentences = extractor.count_processed_sentences(chunk=_chunk(text))
 
@@ -177,10 +177,9 @@ def test_spacy_fastcoref_extractor_falls_back_to_rule_when_no_spacy_entities() -
     """Fallback to deterministic rule extractor when spaCy emits no entities."""
     text = "The Clean Energy Act was discussed by Australia Institute in Queensland."
     doc = StubDoc(ents=[], sentences=[text], clusters=[])
-    extractor = SpacyFastCorefEntityExtractor(
-        config=SpacyFastCorefEntityExtractorConfig(
+    extractor = SpacyEntityExtractor(
+        config=SpacyEntityExtractorConfig(
             extractor_version="spacy-fastcoref-v1",
-            fallback_to_rule_extractor=True,
         ),
         nlp=StubNlp(doc),
     )
@@ -189,8 +188,7 @@ def test_spacy_fastcoref_extractor_falls_back_to_rule_when_no_spacy_entities() -
 
     assert len(entities) >= 1
     assert all(
-        entity.extractor_version == "spacy-fastcoref-v1-fallback-rules"
-        for entity in entities
+        entity.extractor_version == "spacy-fastcoref-v1-fallback-rules" for entity in entities
     )
 
 
@@ -198,10 +196,10 @@ def test_build_spacy_fastcoref_nlp_logs_warning_when_model_missing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Emit warning when configured spaCy model cannot be loaded."""
-    config = SpacyFastCorefEntityExtractorConfig(spacy_model="missing-model", enable_coref=False)
+    config = SpacyEntityExtractorConfig(spacy_model="missing-model")
 
     caplog.set_level(logging.WARNING)
-    nlp = entity_extractors_module._build_spacy_fastcoref_nlp(config)
+    nlp = entity_extractors_module._build_spacy_nlp(config)
 
     assert nlp is not None
     assert "not found; falling back to blank 'en' pipeline" in caplog.text

@@ -48,3 +48,27 @@ def test_filesystem_chunk_repository_returns_none_when_missing(
     repository = FilesystemChunkRepository(state_path)
 
     assert repository.get_chunk(chunk_id="chunk_missing") is None
+
+
+def test_filesystem_chunk_repository_matches_numeric_chunk_id_values(
+    tmp_path: Path,
+) -> None:
+    """Match chunk ids even when JSON payload stores numeric values."""
+    state_path = tmp_path / "chunks.jsonl"
+    record = {
+        "chunk_id": 101,
+        "source_id": "australia_institute",
+        "source_document_id": "https://example.org/report-1",
+        "document_checksum": "checksum-1",
+        "chunk_index": 0,
+        "start_char": 0,
+        "end_char": 42,
+        "chunk_text": "The Clean Energy Act applies in Queensland.",
+    }
+    state_path.write_text(json.dumps(record, ensure_ascii=True) + "\n", encoding="utf-8")
+    repository = FilesystemChunkRepository(state_path)
+
+    chunk = repository.get_chunk(chunk_id="101")
+
+    assert chunk is not None
+    assert chunk.chunk_id == 101

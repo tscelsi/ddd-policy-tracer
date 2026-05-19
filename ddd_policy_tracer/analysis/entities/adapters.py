@@ -24,11 +24,12 @@ class FilesystemChunkRepository(ChunkRepository):
             return None
 
         content = self._state_path.read_text(encoding="utf-8")
+        expected_chunk_id = str(chunk_id)
         for raw_line in content.splitlines():
             if not raw_line.strip():
                 continue
             payload = json.loads(raw_line)
-            if payload["chunk_id"] != chunk_id:
+            if str(payload.get("chunk_id", "")) != expected_chunk_id:
                 continue
             return DocumentChunk(
                 chunk_id=payload["chunk_id"],

@@ -26,10 +26,10 @@ def _write_chunk(path: Path, *, chunk_id: str, text: str) -> None:
 def _write_seed(path: Path) -> None:
     """Write one matching catalog seed row for resolver linkage."""
     row = {
-        "canonical_entity_key": "policy:clean-energy-act",
-        "canonical_name": "Clean Energy Act",
-        "entity_type": "POLICY",
-        "aliases": ["The Clean Energy Act"],
+        "canonical_entity_key": "org:australia-institute",
+        "canonical_name": "Australia Institute",
+        "entity_type": "ORG",
+        "aliases": ["The Australia Institute"],
     }
     path.write_text(json.dumps(row, ensure_ascii=True) + "\n", encoding="utf-8")
 
@@ -44,7 +44,7 @@ def test_run_applies_resolution_metadata_when_catalog_inputs_are_provided(tmp_pa
     _write_chunk(
         chunk_state,
         chunk_id="chunk_1",
-        text="The Clean Energy Act should reduce emissions.",
+        text="The Australia Institute should reduce emissions.",
     )
     _write_seed(seed_path)
 

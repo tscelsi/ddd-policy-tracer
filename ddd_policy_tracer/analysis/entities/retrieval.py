@@ -64,7 +64,10 @@ class HybridCatalogRetriever:
             vector_tokens = vectors_by_key.get(row["canonical_entity_key"], row_tokens)
             vector = _jaccard_similarity(query_tokens, vector_tokens)
             type_bonus = 0.1 if row["entity_type"] == mention_entity_type else 0.0
-            fused = min(1.0, self.lexical_weight * lexical + self.vector_weight * vector + type_bonus)
+            fused = min(
+                1.0,
+                self.lexical_weight * lexical + self.vector_weight * vector + type_bonus,
+            )
             scored.append(
                 RetrievalCandidate(
                     canonical_entity_key=row["canonical_entity_key"],
@@ -101,7 +104,9 @@ class HybridCatalogRetriever:
 
 def _load_catalog_rows(catalog_path: Path) -> list[dict[str, str]]:
     """Load catalog rows from runtime SQLite repository."""
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(catalog_path) as connection:
+        _ensure_catalog_schema(connection)
         rows = connection.execute(
             """
             SELECT canonical_entity_key, canonical_name, entity_type, aliases_json
@@ -120,8 +125,44 @@ def _load_catalog_rows(catalog_path: Path) -> list[dict[str, str]]:
     ]
 
 
+def _ensure_catalog_schema(connection: sqlite3.Connection) -> None:
+    """Create catalog tables so retrieval can run on fresh DB files."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS entity_catalog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            canonical_entity_key TEXT NOT NULL,
+            canonical_name TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            aliases_json TEXT NOT NULL,
+            source TEXT NOT NULL,
+            UNIQUE (canonical_entity_key)
+        )
+        """,
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS catalog_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """,
+    )
+
+
 def _load_vectors(vectors_path: Path) -> dict[str, set[str]]:
     """Load sidecar vector tokens indexed by canonical entity key."""
+    if not vectors_path.exists():
+        vectors_path.parent.mkdir(parents=True, exist_ok=True)
+        vectors_path.write_text(
+            json.dumps(
+                {"catalog_version": "catalog-v1", "seed_hash": "", "vectors": []},
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     payload = json.loads(vectors_path.read_text(encoding="utf-8"))
     vectors = payload.get("vectors")
     if not isinstance(vectors, list):
@@ -156,7 +197,9 @@ def _tokenize(value: str) -> set[str]:
     """Tokenize one text value into lowercase alphanumeric words."""
     return {
         token
-        for token in "".join(character if character.isalnum() else " " for character in value.casefold()).split()
+        for token in "".join(
+            character if character.isalnum() else " " for character in value.casefold()
+        ).split()
         if token
     }
 

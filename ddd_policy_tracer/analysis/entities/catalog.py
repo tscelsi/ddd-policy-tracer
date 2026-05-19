@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .review_queue import SQLiteReviewQueueRepository
+
 
 @dataclass(frozen=True)
 class CatalogImportReport:
@@ -20,6 +22,17 @@ class CatalogImportReport:
     seed_hash: str
     processed_records: int
     inserted_records: int
+    vectors_written: int
+
+
+@dataclass(frozen=True)
+class CatalogPromotionReport:
+    """Summarize one review-driven catalog promotion operation."""
+
+    auto_approved_items: int
+    promoted_items: int
+    inserted_records: int
+    updated_records: int
     vectors_written: int
 
 
@@ -108,6 +121,127 @@ def get_catalog_metadata(*, catalog_path: Path) -> dict[str, str]:
             """,
         ).fetchall()
     return {row[0]: row[1] for row in rows}
+
+
+def promote_review_items(
+    *,
+    review_db_path: Path,
+    catalog_path: Path,
+    vectors_path: Path,
+    catalog_version: str,
+    auto_approve: bool,
+    min_score: float,
+    min_margin: float,
+) -> CatalogPromotionReport:
+    """Promote approved review queue items into runtime catalog artifacts."""
+    review_repository = SQLiteReviewQueueRepository(sqlite_path=review_db_path)
+    _ = auto_approve
+    _ = min_score
+    _ = min_margin
+    auto_approved_items = 0
+
+    candidates = review_repository.list_promotion_candidates()
+    if not candidates:
+        _rewrite_vectors_from_catalog(
+            catalog_path=catalog_path,
+            vectors_path=vectors_path,
+            catalog_version=catalog_version,
+        )
+        return CatalogPromotionReport(
+            auto_approved_items=auto_approved_items,
+            promoted_items=0,
+            inserted_records=0,
+            updated_records=0,
+            vectors_written=0,
+        )
+
+    inserted = 0
+    updated = 0
+    promoted_ids: list[str] = []
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    vectors_path.parent.mkdir(parents=True, exist_ok=True)
+    with _connect(catalog_path) as connection:
+        _initialize_schema(connection)
+        for candidate in candidates:
+            aliases = _normalize_aliases([candidate.canonical_name, *candidate.aliases])
+            existing = connection.execute(
+                """
+                SELECT canonical_name, entity_type, aliases_json, source
+                FROM entity_catalog
+                WHERE canonical_entity_key = ?
+                """,
+                (candidate.canonical_entity_key,),
+            ).fetchone()
+            if existing is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO entity_catalog (
+                        canonical_entity_key,
+                        canonical_name,
+                        entity_type,
+                        aliases_json,
+                        source
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        candidate.canonical_entity_key,
+                        candidate.canonical_name,
+                        candidate.entity_type,
+                        json.dumps(aliases, ensure_ascii=True),
+                        candidate.source,
+                    ),
+                )
+                inserted += max(0, cursor.rowcount)
+                promoted_ids.append(candidate.mention_entity_id)
+                continue
+
+            merged_aliases = _normalize_aliases([*aliases, *_aliases_from_json(str(existing[2]))])
+            update_cursor = connection.execute(
+                """
+                UPDATE entity_catalog
+                SET canonical_name = ?,
+                    entity_type = ?,
+                    aliases_json = ?,
+                    source = ?
+                WHERE canonical_entity_key = ?
+                """,
+                (
+                    candidate.canonical_name,
+                    candidate.entity_type,
+                    json.dumps(merged_aliases, ensure_ascii=True),
+                    candidate.source,
+                    candidate.canonical_entity_key,
+                ),
+            )
+            updated += max(0, update_cursor.rowcount)
+            promoted_ids.append(candidate.mention_entity_id)
+
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO catalog_metadata (key, value)
+            VALUES (?, ?), (?, ?)
+            """,
+            (
+                "catalog_version",
+                catalog_version,
+                "seed_hash",
+                _catalog_content_hash(connection),
+            ),
+        )
+
+    vectors = _rewrite_vectors_from_catalog(
+        catalog_path=catalog_path,
+        vectors_path=vectors_path,
+        catalog_version=catalog_version,
+    )
+    review_repository.mark_promoted(mention_entity_ids=promoted_ids)
+    return CatalogPromotionReport(
+        auto_approved_items=auto_approved_items,
+        promoted_items=len(promoted_ids),
+        inserted_records=inserted,
+        updated_records=updated,
+        vectors_written=vectors,
+    )
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -214,6 +348,66 @@ def _row_to_vector_record(row: dict[str, Any]) -> dict[str, Any]:
         "entity_type": row["entity_type"],
         "tokens": unique_tokens,
     }
+
+
+def _aliases_from_json(raw: str) -> list[str]:
+    """Decode aliases JSON into normalized alias values."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    aliases = [alias for alias in parsed if isinstance(alias, str)]
+    return _normalize_aliases(aliases)
+
+
+def _catalog_rows(connection: sqlite3.Connection) -> list[dict[str, str]]:
+    """Load canonical rows from runtime catalog for vector rebuilds."""
+    rows = connection.execute(
+        """
+        SELECT canonical_entity_key, canonical_name, entity_type, aliases_json
+        FROM entity_catalog
+        ORDER BY canonical_entity_key ASC
+        """,
+    ).fetchall()
+    return [
+        {
+            "canonical_entity_key": str(row[0]),
+            "canonical_name": str(row[1]),
+            "entity_type": str(row[2]),
+            "aliases": _aliases_from_json(str(row[3])),
+        }
+        for row in rows
+    ]
+
+
+def _catalog_content_hash(connection: sqlite3.Connection) -> str:
+    """Hash current catalog contents for metadata compatibility checks."""
+    rows = _catalog_rows(connection)
+    serialized = json.dumps(rows, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _rewrite_vectors_from_catalog(
+    *,
+    catalog_path: Path,
+    vectors_path: Path,
+    catalog_version: str,
+) -> int:
+    """Rewrite sidecar vectors deterministically from SQLite catalog state."""
+    with _connect(catalog_path) as connection:
+        _initialize_schema(connection)
+        rows = _catalog_rows(connection)
+        seed_hash = _catalog_content_hash(connection)
+    vectors = [_row_to_vector_record(row) for row in rows]
+    payload = {
+        "catalog_version": catalog_version,
+        "seed_hash": seed_hash,
+        "vectors": vectors,
+    }
+    vectors_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    return len(vectors)
 
 
 def _build_parser() -> argparse.ArgumentParser:

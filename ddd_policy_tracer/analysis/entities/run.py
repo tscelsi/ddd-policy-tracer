@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-from ddd_policy_tracer.utils.events.local import LocalPublisher
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
+from ddd_policy_tracer.utils.events.local import LocalPublisher
 
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
 from .extractors import (
@@ -19,13 +19,13 @@ from .extractors import (
     RobustEnsembleEntityExtractorConfig,
     RuleBasedEntityExtractorConfig,
     RuleBasedSentenceEntityExtractor,
-    SpacyFastCorefEntityExtractor,
-    SpacyFastCorefEntityExtractorConfig,
+    SpacyEntityExtractor,
+    SpacyEntityExtractorConfig,
 )
 from .models import EntityExtractionReport, EntityMention
 from .resolution import DeterministicEntityJudge, EntityResolutionService
-from .review_queue import SQLiteReviewQueueRepository
 from .retrieval import HybridCatalogRetriever
+from .review_queue import SQLiteReviewQueueRepository
 from .service_layer import EntitiesService
 
 
@@ -97,10 +97,9 @@ def _build_service(
                 extractor_version=f"{extractor_version}-rule",
             ),
         ),
-        spacy_extractor=SpacyFastCorefEntityExtractor(
-            config=SpacyFastCorefEntityExtractorConfig(
+        spacy_extractor=SpacyEntityExtractor(
+            config=SpacyEntityExtractorConfig(
                 extractor_version=f"{extractor_version}-spacy",
-                fallback_to_rule_extractor=False,
             ),
         ),
     )
