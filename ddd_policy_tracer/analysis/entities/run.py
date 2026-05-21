@@ -8,21 +8,17 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Literal
 
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 from ddd_policy_tracer.utils.events.local import LocalPublisher
 
 from .adapters import FilesystemChunkRepository, FilesystemEntityRepository
 from .extractors import (
-    RobustEnsembleEntityExtractor,
-    RobustEnsembleEntityExtractorConfig,
-    RuleBasedEntityExtractorConfig,
-    RuleBasedSentenceEntityExtractor,
     SpacyEntityExtractor,
     SpacyEntityExtractorConfig,
 )
 from .models import EntityExtractionReport, EntityMention
+from .ports import EntityExtractor
 from .resolution import DeterministicEntityJudge, EntityResolutionService
 from .retrieval import HybridCatalogRetriever
 from .review_queue import SQLiteReviewQueueRepository
@@ -34,21 +30,15 @@ def run(
     chunk_id: str,
     chunk_state_path: Path,
     entity_state_path: Path,
-    extractor_kind: Literal["robust-ensemble"] = "robust-ensemble",
-    extractor_version: str = "robust-ensemble-v1",
-    catalog_path: Path | None = None,
+    db_path: Path | None = None,
     vectors_path: Path | None = None,
-    review_db_path: Path | None = None,
 ) -> EntityExtractionReport:
     """Run one concrete entities extraction for a single chunk identifier."""
     service = _build_service(
         chunk_state_path=chunk_state_path,
         entity_state_path=entity_state_path,
-        extractor_kind=extractor_kind,
-        extractor_version=extractor_version,
-        catalog_path=catalog_path,
         vectors_path=vectors_path,
-        review_db_path=review_db_path,
+        db_path=db_path,
     )
     return service.extract_entities_for_chunk(chunk_id=chunk_id)
 
@@ -57,21 +47,15 @@ def run_bulk(
     *,
     chunk_state_path: Path,
     entity_state_path: Path,
-    extractor_kind: Literal["robust-ensemble"] = "robust-ensemble",
-    extractor_version: str = "robust-ensemble-v1",
-    catalog_path: Path | None = None,
+    db_path: Path | None = None,
     vectors_path: Path | None = None,
-    review_db_path: Path | None = None,
 ) -> list[EntityExtractionReport]:
     """Run entities extraction for all chunks available in one dataset."""
     service = _build_service(
         chunk_state_path=chunk_state_path,
         entity_state_path=entity_state_path,
-        extractor_kind=extractor_kind,
-        extractor_version=extractor_version,
-        catalog_path=catalog_path,
+        db_path=db_path,
         vectors_path=vectors_path,
-        review_db_path=review_db_path,
     )
     return service.extract_entities_for_all_chunks()
 
@@ -80,40 +64,23 @@ def _build_service(
     *,
     chunk_state_path: Path,
     entity_state_path: Path,
-    extractor_kind: Literal["robust-ensemble"],
-    extractor_version: str,
-    catalog_path: Path | None,
     vectors_path: Path | None,
-    review_db_path: Path | None,
+    db_path: Path | None = None,
 ) -> EntitiesService:
     """Build entities service dependencies from CLI configuration."""
-    _ = extractor_kind
-    extractor = RobustEnsembleEntityExtractor(
-        config=RobustEnsembleEntityExtractorConfig(
-            extractor_version=extractor_version,
-        ),
-        rule_extractor=RuleBasedSentenceEntityExtractor(
-            RuleBasedEntityExtractorConfig(
-                extractor_version=f"{extractor_version}-rule",
-            ),
-        ),
-        spacy_extractor=SpacyEntityExtractor(
-            config=SpacyEntityExtractorConfig(
-                extractor_version=f"{extractor_version}-spacy",
-            ),
+    # if no db_path is provided, we will just run the extractor without resolution capabilities
+    extractor = SpacyEntityExtractor(
+        config=SpacyEntityExtractorConfig(
+            extractor_version="v1-spacy",
         ),
     )
-    if catalog_path is not None and vectors_path is not None:
-        review_repository = (
-            SQLiteReviewQueueRepository(sqlite_path=review_db_path)
-            if review_db_path is not None
-            else None
-        )
+    if db_path is not None:
+        review_repository = SQLiteReviewQueueRepository(sqlite_path=db_path)
         extractor = _ResolvedEntityExtractor(
             mention_extractor=extractor,
             resolution_service=EntityResolutionService(
                 retriever=HybridCatalogRetriever(
-                    catalog_path=catalog_path,
+                    catalog_path=db_path,
                     vectors_path=vectors_path,
                 ),
                 judge=DeterministicEntityJudge(),
@@ -135,7 +102,7 @@ class _ResolvedEntityExtractor:
     def __init__(
         self,
         *,
-        mention_extractor: RobustEnsembleEntityExtractor,
+        mention_extractor: EntityExtractor,
         resolution_service: EntityResolutionService,
         review_repository: SQLiteReviewQueueRepository | None,
     ) -> None:
@@ -196,30 +163,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to entities JSONL state.",
     )
     parser.add_argument(
-        "--catalog-path",
-        default=None,
-        help="Optional runtime SQLite catalog path for entity resolution.",
-    )
-    parser.add_argument(
         "--vectors-path",
         default=None,
         help="Optional sidecar vectors path for entity resolution.",
     )
     parser.add_argument(
-        "--review-db-path",
+        "--db-path",
         default=None,
-        help="Optional SQLite review queue path for unresolved decisions.",
-    )
-    parser.add_argument(
-        "--extractor",
-        choices=["robust-ensemble"],
-        default="robust-ensemble",
-        help="Extractor strategy to use for entity extraction.",
-    )
-    parser.add_argument(
-        "--extractor-version",
-        default=os.environ.get("ENTITY_EXTRACTOR_VERSION", "robust-ensemble-v1"),
-        help="Extractor version tag for deterministic entity ids.",
+        help="""Optional SQLite path for CatalogEntity entries.
+        Required for resolution capabilities.""",
     )
     parser.add_argument(
         "--log-level",
@@ -250,11 +202,8 @@ def main() -> int:
         reports = run_bulk(
             chunk_state_path=chunk_state_path,
             entity_state_path=entity_state_path,
-            extractor_kind=args.extractor,
-            extractor_version=args.extractor_version,
-            catalog_path=Path(args.catalog_path) if args.catalog_path is not None else None,
+            db_path=Path(args.db_path) if args.db_path is not None else None,
             vectors_path=Path(args.vectors_path) if args.vectors_path is not None else None,
-            review_db_path=Path(args.review_db_path) if args.review_db_path is not None else None,
         )
         summary = {
             "processed_chunks": len(reports),
@@ -272,11 +221,8 @@ def main() -> int:
         chunk_id=args.chunk_id,
         chunk_state_path=chunk_state_path,
         entity_state_path=entity_state_path,
-        extractor_kind=args.extractor,
-        extractor_version=args.extractor_version,
-        catalog_path=Path(args.catalog_path) if args.catalog_path is not None else None,
+        db_path=Path(args.db_path) if args.db_path is not None else None,
         vectors_path=Path(args.vectors_path) if args.vectors_path is not None else None,
-        review_db_path=Path(args.review_db_path) if args.review_db_path is not None else None,
     )
     sys.stdout.write(f"{report}\n")
     return 0

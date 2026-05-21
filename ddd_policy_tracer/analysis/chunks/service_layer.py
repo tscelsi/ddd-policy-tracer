@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ddd_policy_tracer.analysis.chunks.chunking import Chunker
-from ddd_policy_tracer.discovery.domain import SourceDocumentVersion
+from ddd_policy_tracer.discovery.domain import SourceDocument
 
 from .adapters import (
     FilesystemDocumentChunkRepository,
@@ -26,7 +26,7 @@ class ChunkingReport:
 
 def chunk_and_persist_document_versions(
     *,
-    documents: list[SourceDocumentVersion],
+    documents: list[SourceDocument],
     chunker: Chunker,
     state_path: Path,
 ) -> ChunkingReport:
@@ -51,7 +51,7 @@ def chunk_and_persist_document_versions(
             skipped_documents += 1
             continue
 
-        chunks = chunker.chunk_document_version(version=document)
+        chunks = chunker.chunk_document(version=document)
         if not chunks:
             skipped_documents += 1
             continue

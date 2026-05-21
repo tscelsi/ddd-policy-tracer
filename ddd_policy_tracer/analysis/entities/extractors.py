@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol
 
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 
@@ -24,369 +23,9 @@ _POLICY_CUES = (
     "target",
 )
 _PROGRAM_CUES = ("program", "initiative", "scheme", "fund", "package", "plan")
-_ORG_CUES = (
-    "institute",
-    "department",
-    "ministry",
-    "commission",
-    "council",
-    "agency",
-    "university",
-    "bank",
-    "foundation",
-)
-_PERSON_TITLES = ("Dr", "Prof", "Mr", "Ms", "Mrs")
-
-_POLICY_RE = re.compile(
-    r"\b((?!(?:The|A|An)\b)[A-Z][A-Za-z0-9'&/-]*(?:\s+[A-Z][A-Za-z0-9'&/-]*){0,7}\s+"
-    r"(?:Policy|Act|Bill|Regulation|Strategy|Framework|Target))\b",
-)
-_PROGRAM_RE = re.compile(
-    r"\b((?!(?:The|A|An)\b)[A-Z][A-Za-z0-9'&/-]*(?:\s+[A-Z][A-Za-z0-9'&/-]*){0,7}\s+"
-    r"(?:Program|Initiative|Scheme|Fund|Package|Plan))\b",
-)
-_ORG_RE = re.compile(
-    r"\b((?!(?:The|A|An)\b)[A-Z][A-Za-z0-9'&/-]*(?:\s+[A-Z][A-Za-z0-9'&/-]*){0,7}\s+"
-    r"(?:Institute|Department|Ministry|Commission|Council|Agency|University|Bank|Foundation))\b",
-)
-_PERSON_TITLE_RE = re.compile(r"\b(?:Dr|Prof|Mr|Ms|Mrs)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b")
-_PERSON_NAME_RE = re.compile(r"\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b")
-_SENTENCE_PERSON_STOP_SUFFIX = (
-    "Institute",
-    "Department",
-    "Ministry",
-    "Commission",
-    "Council",
-    "Agency",
-    "University",
-    "Bank",
-    "Foundation",
-    "Policy",
-    "Act",
-    "Bill",
-    "Regulation",
-    "Strategy",
-    "Framework",
-    "Target",
-    "Program",
-    "Initiative",
-    "Scheme",
-    "Fund",
-    "Package",
-    "Plan",
-)
 
 _QUOTE_PAIRS = (('"', '"'), ("'", "'"), ("\u201c", "\u201d"))
 _LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class RuleBasedEntityExtractorConfig:
-    """Configure deterministic entity extraction thresholds and precedence."""
-
-    extractor_version: str = "rules-v1"
-    policy_threshold: float = 1.0
-    program_threshold: float = 1.0
-    org_threshold: float = 1.0
-    person_threshold: float = 1.0
-    jurisdiction_threshold: float = 1.0
-    cue_weight: float = 1.0
-    boundary_weight: float = 0.4
-    title_weight: float = 0.6
-    precedence: tuple[EntityType, ...] = (
-        "POLICY",
-        "PROGRAM",
-        "ORG",
-        "PERSON",
-        "JURISDICTION",
-    )
-    jurisdictions_path: Path | None = None
-
-
-@dataclass(frozen=True)
-class RuleBasedSentenceEntityExtractor(EntityExtractor):
-    """Extract sentence-bounded entity mentions using deterministic rules."""
-
-    config: RuleBasedEntityExtractorConfig = RuleBasedEntityExtractorConfig()
-
-    def extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
-        """Return deterministic entity mentions for one source chunk."""
-        candidates: list[EntityMention] = []
-        jurisdictions = self._load_jurisdictions()
-        precedence_rank = {
-            entity_type: index for index, entity_type in enumerate(self.config.precedence)
-        }
-        for sentence_text, start_char, _end_char in _split_sentences_with_offsets(
-            chunk.chunk_text,
-        ):
-            sentence_candidates = self._extract_sentence_candidates(
-                sentence_text=sentence_text,
-                chunk=chunk,
-                sentence_start_char=start_char,
-                jurisdictions=jurisdictions,
-            )
-            kept = self._resolve_overlaps(
-                sentence_candidates,
-                precedence_rank=precedence_rank,
-            )
-            candidates.extend(kept)
-
-        return candidates
-
-    def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
-        """Count sentence units processed from one chunk payload."""
-        return len(_split_sentences_with_offsets(chunk.chunk_text))
-
-    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
-        """Extract entity mentions for many chunks with deterministic batching."""
-        entities: list[EntityMention] = []
-        for chunk in chunks:
-            entities.extend(self.extract(chunk=chunk))
-        return entities
-
-    def _extract_sentence_candidates(
-        self,
-        *,
-        sentence_text: str,
-        chunk: DocumentChunk,
-        sentence_start_char: int,
-        jurisdictions: tuple[str, ...],
-    ) -> list[EntityMention]:
-        """Extract deterministic entity candidates from one sentence."""
-        raw_candidates: list[EntityMention] = []
-        raw_candidates.extend(
-            self._match_pattern_candidates(
-                chunk=chunk,
-                sentence_text=sentence_text,
-                sentence_start_char=sentence_start_char,
-                pattern=_POLICY_RE,
-                entity_type="POLICY",
-                threshold=self.config.policy_threshold,
-                cue_terms=_POLICY_CUES,
-            ),
-        )
-        raw_candidates.extend(
-            self._match_pattern_candidates(
-                chunk=chunk,
-                sentence_text=sentence_text,
-                sentence_start_char=sentence_start_char,
-                pattern=_PROGRAM_RE,
-                entity_type="PROGRAM",
-                threshold=self.config.program_threshold,
-                cue_terms=_PROGRAM_CUES,
-            ),
-        )
-        raw_candidates.extend(
-            self._match_pattern_candidates(
-                chunk=chunk,
-                sentence_text=sentence_text,
-                sentence_start_char=sentence_start_char,
-                pattern=_ORG_RE,
-                entity_type="ORG",
-                threshold=self.config.org_threshold,
-                cue_terms=_ORG_CUES,
-            ),
-        )
-        raw_candidates.extend(
-            self._match_person_candidates(
-                chunk=chunk,
-                sentence_text=sentence_text,
-                sentence_start_char=sentence_start_char,
-            ),
-        )
-        raw_candidates.extend(
-            self._match_jurisdiction_candidates(
-                chunk=chunk,
-                sentence_text=sentence_text,
-                sentence_start_char=sentence_start_char,
-                jurisdictions=jurisdictions,
-            ),
-        )
-        return raw_candidates
-
-    def _resolve_overlaps(
-        self,
-        candidates: list[EntityMention],
-        *,
-        precedence_rank: dict[EntityType, int],
-    ) -> list[EntityMention]:
-        """Resolve overlapping mentions by confidence, precedence, and span length."""
-        kept: list[EntityMention] = []
-        ordered = sorted(
-            candidates,
-            key=lambda candidate: (
-                -candidate.confidence,
-                precedence_rank.get(candidate.entity_type, 999),
-                -(candidate.end_char - candidate.start_char),
-                candidate.start_char,
-            ),
-        )
-
-        for candidate in ordered:
-            if any(_spans_overlap(candidate, existing) for existing in kept):
-                continue
-            kept.append(candidate)
-
-        return sorted(kept, key=lambda candidate: (candidate.start_char, candidate.end_char))
-
-    def _match_pattern_candidates(
-        self,
-        *,
-        chunk: DocumentChunk,
-        sentence_text: str,
-        sentence_start_char: int,
-        pattern: re.Pattern[str],
-        entity_type: EntityType,
-        threshold: float,
-        cue_terms: tuple[str, ...],
-    ) -> list[EntityMention]:
-        """Create type-specific candidates from one regex pattern match set."""
-        candidates: list[EntityMention] = []
-        for match in pattern.finditer(sentence_text):
-            mention_text = match.group(1)
-            normalized = _normalize_mention_text(mention_text)
-            confidence = self._score_mention(
-                mention_text=mention_text,
-                normalized_mention_text=normalized,
-                cue_terms=cue_terms,
-                has_title=False,
-            )
-            if confidence < threshold:
-                continue
-            start_char = sentence_start_char + match.start(1)
-            end_char = sentence_start_char + match.end(1)
-            candidates.append(
-                _build_entity_mention(
-                    chunk=chunk,
-                    start_char=start_char,
-                    end_char=end_char,
-                    mention_text=chunk.chunk_text[start_char:end_char],
-                    normalized_mention_text=normalized,
-                    entity_type=entity_type,
-                    confidence=confidence,
-                    extractor_version=self.config.extractor_version,
-                ),
-            )
-        return candidates
-
-    def _match_person_candidates(
-        self,
-        *,
-        chunk: DocumentChunk,
-        sentence_text: str,
-        sentence_start_char: int,
-    ) -> list[EntityMention]:
-        """Extract person candidates using title-aware and name pattern rules."""
-        candidates: list[EntityMention] = []
-        candidate_groups = [
-            (match.group(0), match.start(0), match.end(0), True)
-            for match in _PERSON_TITLE_RE.finditer(sentence_text)
-        ]
-        if not candidate_groups:
-            candidate_groups = [
-                (match.group(1), match.start(1), match.end(1), False)
-                for match in _PERSON_NAME_RE.finditer(sentence_text)
-            ]
-
-        for mention_text, start, end, has_title in candidate_groups:
-            normalized = _normalize_mention_text(mention_text)
-            if any(normalized.endswith(suffix) for suffix in _SENTENCE_PERSON_STOP_SUFFIX):
-                continue
-
-            confidence = self._score_mention(
-                mention_text=mention_text,
-                normalized_mention_text=normalized,
-                cue_terms=(),
-                has_title=has_title,
-            )
-            if confidence < self.config.person_threshold:
-                continue
-
-            start_char = sentence_start_char + start
-            end_char = sentence_start_char + end
-            candidates.append(
-                _build_entity_mention(
-                    chunk=chunk,
-                    start_char=start_char,
-                    end_char=end_char,
-                    mention_text=chunk.chunk_text[start_char:end_char],
-                    normalized_mention_text=normalized,
-                    entity_type="PERSON",
-                    confidence=confidence,
-                    extractor_version=self.config.extractor_version,
-                ),
-            )
-
-        return candidates
-
-    def _match_jurisdiction_candidates(
-        self,
-        *,
-        chunk: DocumentChunk,
-        sentence_text: str,
-        sentence_start_char: int,
-        jurisdictions: tuple[str, ...],
-    ) -> list[EntityMention]:
-        """Extract jurisdiction candidates from deterministic gazetteer terms."""
-        candidates: list[EntityMention] = []
-        lowered_sentence = sentence_text.casefold()
-        for jurisdiction in jurisdictions:
-            pattern = re.compile(rf"\b{re.escape(jurisdiction)}\b", flags=re.IGNORECASE)
-            for match in pattern.finditer(sentence_text):
-                mention_text = match.group(0)
-                normalized = _normalize_mention_text(mention_text)
-                confidence = self._score_mention(
-                    mention_text=mention_text,
-                    normalized_mention_text=normalized,
-                    cue_terms=(jurisdiction.casefold(),),
-                    has_title=False,
-                )
-                if confidence < self.config.jurisdiction_threshold:
-                    continue
-
-                if mention_text.casefold() not in lowered_sentence:
-                    continue
-
-                start_char = sentence_start_char + match.start(0)
-                end_char = sentence_start_char + match.end(0)
-                candidates.append(
-                    _build_entity_mention(
-                        chunk=chunk,
-                        start_char=start_char,
-                        end_char=end_char,
-                        mention_text=chunk.chunk_text[start_char:end_char],
-                        normalized_mention_text=normalized,
-                        entity_type="JURISDICTION",
-                        confidence=confidence,
-                        extractor_version=self.config.extractor_version,
-                    ),
-                )
-        return candidates
-
-    def _score_mention(
-        self,
-        *,
-        mention_text: str,
-        normalized_mention_text: str,
-        cue_terms: tuple[str, ...],
-        has_title: bool,
-    ) -> float:
-        """Score one mention candidate using deterministic weighted cues."""
-        score = 0.0
-        lowered = mention_text.casefold()
-        if any(cue in lowered for cue in cue_terms):
-            score += self.config.cue_weight
-        if _is_boundary_clean(normalized_mention_text):
-            score += self.config.boundary_weight
-        if has_title:
-            score += self.config.title_weight
-        return min(1.0, score)
-
-    def _load_jurisdictions(self) -> tuple[str, ...]:
-        """Load jurisdiction gazetteer terms from configured resource path."""
-        path = self.config.jurisdictions_path or _default_jurisdictions_path()
-        content = path.read_text(encoding="utf-8")
-        return tuple(line.strip() for line in content.splitlines() if line.strip())
 
 
 class SpacyEntityLike(Protocol):
@@ -431,7 +70,7 @@ class SpacyEntityExtractorConfig:
 
 @dataclass(frozen=True)
 class SpacyEntityExtractor(EntityExtractor):
-    """Extract entities with spaCy NER and enrich canonical keys via fastcoref."""
+    """Extract PROPN entities with spaCy."""
 
     config: SpacyEntityExtractorConfig = SpacyEntityExtractorConfig()
     nlp: SpacyNlpLike | None = None
@@ -476,34 +115,35 @@ class SpacyEntityExtractor(EntityExtractor):
                 if canonical_text is not None and canonical_text.strip()
                 else None
             )
-
-            entities.append(
-                _build_entity_mention(
-                    chunk=chunk,
-                    start_char=entity.start_char,
-                    end_char=entity.end_char,
-                    mention_text=mention_text,
-                    normalized_mention_text=normalized,
-                    entity_type=entity_type,
-                    confidence=1.0,
-                    extractor_version=self.config.extractor_version,
-                    canonical_entity_key=canonical_key,
-                    metadata={
-                        "spacy_label": entity.label_,
-                        "coref_canonical": canonical_text,
-                    }
-                    if canonical_text is not None
-                    else {"spacy_label": entity.label_},
-                ),
-            )
-        if entities:
-            return entities
-        fallback = RuleBasedSentenceEntityExtractor(
-            config=RuleBasedEntityExtractorConfig(
-                extractor_version=f"{self.config.extractor_version}-fallback-rules",
-            ),
-        )
-        return fallback.extract(chunk=chunk)
+            pos_labels = [
+                token.pos_
+                for token in doc
+                if token.idx >= entity.start_char and token.idx < entity.end_char
+            ]
+            ent_is_proper_noun = any(token == "PROPN" for token in pos_labels)
+            # check if PROPN as pos
+            if ent_is_proper_noun:
+                entities.append(
+                    _build_entity_mention(
+                        chunk=chunk,
+                        start_char=entity.start_char,
+                        end_char=entity.end_char,
+                        mention_text=mention_text,
+                        normalized_mention_text=normalized,
+                        entity_type=entity_type,
+                        confidence=1.0,
+                        extractor_version=self.config.extractor_version,
+                        canonical_entity_key=canonical_key,
+                        metadata={
+                            "spacy_label": entity.label_,
+                            "coref_canonical": canonical_text,
+                            "pos_labels": pos_labels,
+                        }
+                        if canonical_text is not None
+                        else {"spacy_label": entity.label_, "pos_labels": pos_labels},
+                    ),
+                )
+        return entities
 
     def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
         """Count sentence units from spaCy parsing for report semantics."""
@@ -513,203 +153,6 @@ class SpacyEntityExtractor(EntityExtractor):
             return len(list(doc.sents))
         except Exception:
             return len(_split_sentences_with_offsets(chunk.chunk_text))
-
-
-@dataclass(frozen=True)
-class RobustEnsembleEntityExtractorConfig:
-    """Configure the robust single-path mention generation strategy."""
-
-    extractor_version: str = "robust-ensemble-v1"
-    source_priority: tuple[str, ...] = ("spacy", "gazetteer", "rule")
-
-
-@dataclass(frozen=True)
-class RobustEnsembleEntityExtractor(EntityExtractor):
-    """Extract mentions with an ensemble and deterministic overlap merge."""
-
-    config: RobustEnsembleEntityExtractorConfig = RobustEnsembleEntityExtractorConfig()
-    rule_extractor: EntityExtractor | None = None
-    spacy_extractor: EntityExtractor | None = None
-
-    def extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
-        """Combine mention channels and resolve conflicts deterministically."""
-        rule_mentions = self._rule_extractor().extract(chunk=chunk)
-        spacy_mentions = self._spacy_extractor().extract(chunk=chunk)
-        gazetteer_mentions = self._extract_gazetteer_dependency_mentions(chunk=chunk)
-        merged = self._merge_mentions(
-            rule_mentions=rule_mentions,
-            spacy_mentions=spacy_mentions,
-            gazetteer_mentions=gazetteer_mentions,
-        )
-        return [self._with_runtime_version(mention=mention) for mention in merged]
-
-    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
-        """Run extraction for many chunks using deterministic ordering."""
-        if not chunks:
-            return []
-        rule_mentions = self._rule_extractor().extract_many(chunks=chunks)
-        spacy_mentions = self._spacy_extractor().extract_many(chunks=chunks)
-        gazetteer_mentions = [
-            mention
-            for chunk in chunks
-            for mention in self._extract_gazetteer_dependency_mentions(chunk=chunk)
-        ]
-        rule_by_chunk = _group_mentions_by_chunk(rule_mentions)
-        spacy_by_chunk = _group_mentions_by_chunk(spacy_mentions)
-        gazetteer_by_chunk = _group_mentions_by_chunk(gazetteer_mentions)
-
-        merged: list[EntityMention] = []
-        for chunk in chunks:
-            chunk_merged = self._merge_mentions(
-                rule_mentions=rule_by_chunk.get(chunk.chunk_id, []),
-                spacy_mentions=spacy_by_chunk.get(chunk.chunk_id, []),
-                gazetteer_mentions=gazetteer_by_chunk.get(chunk.chunk_id, []),
-            )
-            merged.extend(self._with_runtime_version(mention=mention) for mention in chunk_merged)
-        return merged
-
-    def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
-        """Count processed sentence-like units for reporting semantics."""
-        return len(_split_sentences_with_offsets(chunk.chunk_text))
-
-    def _rule_extractor(self) -> EntityExtractor:
-        """Return the configured or default rule-based mention channel."""
-        if self.rule_extractor is not None:
-            return self.rule_extractor
-        return RuleBasedSentenceEntityExtractor(
-            config=RuleBasedEntityExtractorConfig(
-                extractor_version=f"{self.config.extractor_version}-rule",
-            ),
-        )
-
-    def _spacy_extractor(self) -> EntityExtractor:
-        """Return the configured or default spaCy/coref mention channel."""
-        if self.spacy_extractor is not None:
-            return self.spacy_extractor
-        return SpacyEntityExtractor(
-            config=SpacyEntityExtractorConfig(
-                extractor_version=f"{self.config.extractor_version}-spacy",
-            ),
-        )
-
-    def _extract_gazetteer_dependency_mentions(
-        self,
-        *,
-        chunk: DocumentChunk,
-    ) -> list[EntityMention]:
-        """Extract extra mentions from gazetteer-like boundary patterns."""
-        candidates: list[EntityMention] = []
-        for sentence_text, start_char, _end_char in _split_sentences_with_offsets(chunk.chunk_text):
-            for cue in _POLICY_CUES + _PROGRAM_CUES + _ORG_CUES:
-                pattern = re.compile(
-                    rf"\b([A-Z][A-Za-z0-9'&/-]*(?:\s+[A-Z][A-Za-z0-9'&/-]*){{0,6}}\s+{cue.title()})\b",
-                )
-                for match in pattern.finditer(sentence_text):
-                    mention_text = match.group(1)
-                    normalized = _normalize_mention_text(mention_text)
-                    entity_type = _map_gazetteer_entity_type(cue=cue)
-                    mention_start = start_char + match.start(1)
-                    mention_end = start_char + match.end(1)
-                    candidates.append(
-                        _build_entity_mention(
-                            chunk=chunk,
-                            start_char=mention_start,
-                            end_char=mention_end,
-                            mention_text=chunk.chunk_text[mention_start:mention_end],
-                            normalized_mention_text=normalized,
-                            entity_type=entity_type,
-                            confidence=0.9,
-                            extractor_version=f"{self.config.extractor_version}-gazetteer",
-                            metadata={"channel": "gazetteer"},
-                        ),
-                    )
-        return candidates
-
-    def _merge_mentions(
-        self,
-        *,
-        rule_mentions: list[EntityMention],
-        spacy_mentions: list[EntityMention],
-        gazetteer_mentions: list[EntityMention],
-    ) -> list[EntityMention]:
-        """Merge channels with deterministic overlap and dedup resolution."""
-        rank = {source: index for index, source in enumerate(self.config.source_priority)}
-
-        def source_for(mention: EntityMention) -> str:
-            metadata = mention.metadata or {}
-            channel = metadata.get("channel")
-            if isinstance(channel, str):
-                return channel
-            if "spacy" in mention.extractor_version:
-                return "spacy"
-            if "gazetteer" in mention.extractor_version:
-                return "gazetteer"
-            return "rule"
-
-        ordered = sorted(
-            [*spacy_mentions, *gazetteer_mentions, *rule_mentions],
-            key=lambda mention: (
-                -mention.confidence,
-                rank.get(source_for(mention), 999),
-                mention.start_char,
-                mention.end_char,
-                mention.entity_type,
-            ),
-        )
-        kept: list[EntityMention] = []
-        for candidate in ordered:
-            if any(_spans_overlap(candidate, existing) for existing in kept):
-                continue
-            kept.append(candidate)
-
-        unique: dict[tuple[int, int, str, str], EntityMention] = {}
-        for mention in kept:
-            unique[
-                (
-                    mention.start_char,
-                    mention.end_char,
-                    mention.entity_type,
-                    mention.normalized_mention_text.casefold(),
-                )
-            ] = mention
-        return sorted(
-            unique.values(),
-            key=lambda mention: (mention.start_char, mention.end_char, mention.entity_type),
-        )
-
-    def _with_runtime_version(self, *, mention: EntityMention) -> EntityMention:
-        """Normalize mention ids and versions to one runtime strategy label."""
-        entity_id = _build_entity_id(
-            chunk_id=mention.chunk_id,
-            start_char=mention.start_char,
-            end_char=mention.end_char,
-            entity_type=mention.entity_type,
-            extractor_version=self.config.extractor_version,
-        )
-        metadata = dict(cast(dict[str, object], mention.metadata or {}))
-        if "channel" not in metadata:
-            if "spacy" in mention.extractor_version:
-                metadata["channel"] = "spacy"
-            elif "gazetteer" in mention.extractor_version:
-                metadata["channel"] = "gazetteer"
-            else:
-                metadata["channel"] = "rule"
-        return EntityMention(
-            entity_id=entity_id,
-            chunk_id=mention.chunk_id,
-            source_id=mention.source_id,
-            source_document_id=mention.source_document_id,
-            document_checksum=mention.document_checksum,
-            start_char=mention.start_char,
-            end_char=mention.end_char,
-            mention_text=mention.mention_text,
-            normalized_mention_text=mention.normalized_mention_text,
-            entity_type=mention.entity_type,
-            confidence=mention.confidence,
-            extractor_version=self.config.extractor_version,
-            canonical_entity_key=mention.canonical_entity_key,
-            metadata=metadata,
-        )
 
 
 def _build_spacy_nlp(config: SpacyEntityExtractorConfig) -> SpacyNlpLike:

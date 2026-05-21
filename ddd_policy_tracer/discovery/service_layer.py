@@ -17,7 +17,7 @@ from .adapters import (
     SQLiteSourceDocumentRepository,
 )
 from .domain import (
-    SourceDocumentVersion,
+    SourceDocument,
     compute_checksum,
     normalize_source_document_id,
     normalize_text,
@@ -131,7 +131,7 @@ def ingest_source_documents(
                 source_document_id=source_document_id,
                 content=extracted.artifact_content,
             )
-            version = SourceDocumentVersion(
+            version = SourceDocument(
                 source_id=source_id,
                 source_document_id=source_document_id,
                 source_url=source_url,
@@ -227,7 +227,7 @@ def get_source_document_versions(
     state_path: Path | None = None,
     sqlite_path: Path | None = None,
     source_id: str,
-) -> list[SourceDocumentVersion]:
+) -> list[SourceDocument]:
     """Load persisted source document versions for one source."""
     resolved_state_path = state_path or sqlite_path
     if resolved_state_path is None:

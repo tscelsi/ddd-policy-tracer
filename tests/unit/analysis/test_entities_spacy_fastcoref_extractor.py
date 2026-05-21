@@ -173,25 +173,6 @@ def test_spacy_fastcoref_extractor_counts_spacy_sentences() -> None:
     assert processed_sentences == 2
 
 
-def test_spacy_fastcoref_extractor_falls_back_to_rule_when_no_spacy_entities() -> None:
-    """Fallback to deterministic rule extractor when spaCy emits no entities."""
-    text = "The Clean Energy Act was discussed by Australia Institute in Queensland."
-    doc = StubDoc(ents=[], sentences=[text], clusters=[])
-    extractor = SpacyEntityExtractor(
-        config=SpacyEntityExtractorConfig(
-            extractor_version="spacy-fastcoref-v1",
-        ),
-        nlp=StubNlp(doc),
-    )
-
-    entities = extractor.extract(chunk=_chunk(text))
-
-    assert len(entities) >= 1
-    assert all(
-        entity.extractor_version == "spacy-fastcoref-v1-fallback-rules" for entity in entities
-    )
-
-
 def test_build_spacy_fastcoref_nlp_logs_warning_when_model_missing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

@@ -8,7 +8,7 @@ from typing import Protocol
 
 import spacy
 
-from ddd_policy_tracer.discovery.domain import SourceDocumentVersion
+from ddd_policy_tracer.discovery.domain import SourceDocument
 
 from .chunking_models import ChunkingConfig, DocumentChunk
 
@@ -36,10 +36,10 @@ class Chunker(Protocol):
         """Update chunking settings on one SpacyChunker."""
         self.config = config
 
-    def chunk_document_version(
+    def chunk_document(
         self,
         *,
-        version: SourceDocumentVersion,
+        version: SourceDocument,
     ) -> list[DocumentChunk]:
         """Chunk one source document version into text spans for claim extraction."""
 
@@ -47,15 +47,15 @@ class Chunker(Protocol):
 class SpacyChunker(Chunker):
     """Chunk one source document version into text spans for claim extraction using spaCy."""
 
-    def chunk_document_version(
+    def chunk_document(
         self,
         *,
-        version: SourceDocumentVersion,
+        doc: SourceDocument,
     ) -> list[DocumentChunk]:
-        """Split one document version into stable sentence-based chunks."""
+        """Split one document into stable sentence-based chunks."""
         _validate_chunking_config(self.config)
 
-        normalized_text = version.normalized_text.strip()
+        normalized_text = doc.normalized_text.strip()
         if not normalized_text:
             return []
 
@@ -74,9 +74,9 @@ class SpacyChunker(Chunker):
             end_char = sentences[end_sentence_index - 1].end_char
             chunk_text = normalized_text[start_char:end_char]
             chunk_id = _build_chunk_id(
-                source_id=version.source_id,
-                source_document_id=version.source_document_id,
-                checksum=version.checksum,
+                source_id=doc.source_id,
+                source_document_id=doc.source_document_id,
+                checksum=doc.checksum,
                 chunk_index=index,
                 start_char=start_char,
                 end_char=end_char,
@@ -84,9 +84,9 @@ class SpacyChunker(Chunker):
             chunks.append(
                 DocumentChunk(
                     chunk_id=chunk_id,
-                    source_id=version.source_id,
-                    source_document_id=version.source_document_id,
-                    document_checksum=version.checksum,
+                    source_id=doc.source_id,
+                    source_document_id=doc.source_document_id,
+                    document_checksum=doc.checksum,
                     chunk_index=index,
                     start_char=start_char,
                     end_char=end_char,

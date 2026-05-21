@@ -36,7 +36,7 @@ class HybridCatalogRetriever:
     """Retrieve top-k catalog candidates by fused lexical and vector signals."""
 
     catalog_path: Path
-    vectors_path: Path
+    vectors_path: Path | None
     lexical_weight: float = 0.6
     vector_weight: float = 0.4
 
@@ -150,8 +150,10 @@ def _ensure_catalog_schema(connection: sqlite3.Connection) -> None:
     )
 
 
-def _load_vectors(vectors_path: Path) -> dict[str, set[str]]:
+def _load_vectors(vectors_path: Path | None) -> dict[str, set[str]]:
     """Load sidecar vector tokens indexed by canonical entity key."""
+    if not vectors_path:
+        return {}
     if not vectors_path.exists():
         vectors_path.parent.mkdir(parents=True, exist_ok=True)
         vectors_path.write_text(

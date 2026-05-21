@@ -9,10 +9,6 @@ from .catalog import (
     promote_review_items,
 )
 from .extractors import (
-    RobustEnsembleEntityExtractor,
-    RobustEnsembleEntityExtractorConfig,
-    RuleBasedEntityExtractorConfig,
-    RuleBasedSentenceEntityExtractor,
     SpacyEntityExtractor,
     SpacyEntityExtractorConfig,
 )
@@ -66,10 +62,6 @@ __all__ = [
     "RetrievalResult",
     "ReviewDecisionReport",
     "ReviewQueueWriteReport",
-    "RobustEnsembleEntityExtractor",
-    "RobustEnsembleEntityExtractorConfig",
-    "RuleBasedEntityExtractorConfig",
-    "RuleBasedSentenceEntityExtractor",
     "SQLiteReviewQueueRepository",
     "SpacyEntityExtractor",
     "SpacyEntityExtractorConfig",

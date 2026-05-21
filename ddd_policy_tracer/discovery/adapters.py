@@ -17,7 +17,7 @@ from uuid import uuid4
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
-from .domain import SourceDocumentVersion
+from .domain import SourceDocument
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,7 @@ class SQLiteSourceDocumentRepository:
         *,
         source_id: str,
         source_document_id: str,
-    ) -> SourceDocumentVersion | None:
+    ) -> SourceDocument | None:
         """Return the latest persisted version for one source identity."""
         with self._connect() as connection:
             row = connection.execute(
@@ -89,9 +89,9 @@ class SQLiteSourceDocumentRepository:
         if row is None:
             return None
 
-        return SourceDocumentVersion(*row)
+        return SourceDocument(*row)
 
-    def add_version(self, version: SourceDocumentVersion) -> None:
+    def add_version(self, version: SourceDocument) -> None:
         """Persist a new append-only source document version record."""
         with self._connect() as connection:
             connection.execute(
@@ -117,7 +117,7 @@ class SQLiteSourceDocumentRepository:
                 ),
             )
 
-    def list_versions(self, *, source_id: str) -> list[SourceDocumentVersion]:
+    def list_versions(self, *, source_id: str) -> list[SourceDocument]:
         """List all persisted source document versions for a source."""
         with self._connect() as connection:
             rows = connection.execute(
@@ -132,7 +132,7 @@ class SQLiteSourceDocumentRepository:
                 (source_id,),
             ).fetchall()
 
-        return [SourceDocumentVersion(*row) for row in rows]
+        return [SourceDocument(*row) for row in rows]
 
 
 class FilesystemSourceDocumentRepository:
@@ -148,20 +148,19 @@ class FilesystemSourceDocumentRepository:
         *,
         source_id: str,
         source_document_id: str,
-    ) -> SourceDocumentVersion | None:
+    ) -> SourceDocument | None:
         """Return the latest stored version for one source identity."""
         versions = self._read_all()
         matches = [
             version
             for version in versions
-            if version.source_id == source_id
-            and version.source_document_id == source_document_id
+            if version.source_id == source_id and version.source_document_id == source_document_id
         ]
         if not matches:
             return None
         return matches[-1]
 
-    def add_version(self, version: SourceDocumentVersion) -> None:
+    def add_version(self, version: SourceDocument) -> None:
         """Append one version record to the filesystem state file."""
         record = {
             "source_id": version.source_id,
@@ -180,27 +179,23 @@ class FilesystemSourceDocumentRepository:
         with self._state_path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
 
-    def list_versions(self, *, source_id: str) -> list[SourceDocumentVersion]:
+    def list_versions(self, *, source_id: str) -> list[SourceDocument]:
         """List all stored versions for a source from filesystem state."""
-        return [
-            version
-            for version in self._read_all()
-            if version.source_id == source_id
-        ]
+        return [version for version in self._read_all() if version.source_id == source_id]
 
-    def _read_all(self) -> list[SourceDocumentVersion]:
+    def _read_all(self) -> list[SourceDocument]:
         """Load all stored versions from the JSONL state file."""
         if not self._state_path.exists():
             return []
 
-        versions: list[SourceDocumentVersion] = []
+        versions: list[SourceDocument] = []
         content = self._state_path.read_text(encoding="utf-8")
         for raw_line in content.splitlines():
             if not raw_line.strip():
                 continue
             payload = json.loads(raw_line)
             versions.append(
-                SourceDocumentVersion(
+                SourceDocument(
                     source_id=payload["source_id"],
                     source_document_id=payload["source_document_id"],
                     source_url=payload["source_url"],
@@ -227,11 +222,7 @@ class DiskArtifactStore:
 
     def store(self, *, source_document_id: str, content: bytes) -> str:
         """Write raw content to disk and return the artifact reference path."""
-        safe_id = (
-            source_document_id.replace("://", "_")
-            .replace("/", "_")
-            .replace("?", "_")
-        )
+        safe_id = source_document_id.replace("://", "_").replace("/", "_").replace("?", "_")
         file_path = self._artifact_dir / f"{safe_id}_{uuid4().hex}.bin"
         file_path.write_bytes(content)
         return str(file_path)
@@ -396,19 +387,13 @@ def _parse_timestamp(value: str) -> datetime | None:
 
 
 def _is_newer_timestamp(
-    *, candidate_timestamp: str | None, current_timestamp: str | None,
+    *,
+    candidate_timestamp: str | None,
+    current_timestamp: str | None,
 ) -> bool:
     """Return true when candidate timestamp is newer than current value."""
-    candidate = (
-        _parse_timestamp(candidate_timestamp)
-        if candidate_timestamp is not None
-        else None
-    )
-    current = (
-        _parse_timestamp(current_timestamp)
-        if current_timestamp is not None
-        else None
-    )
+    candidate = _parse_timestamp(candidate_timestamp) if candidate_timestamp is not None else None
+    current = _parse_timestamp(current_timestamp) if current_timestamp is not None else None
 
     if candidate is None:
         return False
@@ -428,7 +413,9 @@ class _ReportPdfLinkParser(HTMLParser):
         self._active_text_parts: list[str] = []
 
     def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]],
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
     ) -> None:
         """Track anchor href values while entering anchor tags."""
         if tag != "a":
@@ -480,7 +467,8 @@ def _is_lowy_publication_detail_url(url: str) -> bool:
 
 
 def extract_pdf_urls_from_report_html(
-    report_url: str, html_bytes: bytes,
+    report_url: str,
+    html_bytes: bytes,
 ) -> list[str]:
     """Extract and prioritize absolute PDF links from a report HTML page."""
     parser = _ReportPdfLinkParser()

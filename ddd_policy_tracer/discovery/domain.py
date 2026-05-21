@@ -19,7 +19,7 @@ TRACKING_QUERY_KEYS = {
 
 
 @dataclass(frozen=True)
-class SourceDocumentVersion:
+class SourceDocument:
     """Represent one append-only version snapshot of a source document."""
 
     source_id: str

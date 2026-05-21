@@ -120,7 +120,7 @@ class DeterministicEntityJudge:
         mention: EntityMention,
         retrieval_result: RetrievalResult,
     ) -> ResolutionDecision:
-        """Evaluate one mention against retrieval candidates and thresholds."""
+        """Judging entity mention to see if new catalog candidate is found."""
         eligibility = self.eligibility_policy.evaluate(mention=mention)
         if not eligibility.is_eligible:
             return ResolutionDecision(
@@ -132,22 +132,23 @@ class DeterministicEntityJudge:
                 top_candidates=[],
             )
 
-        evidence = [
-            _candidate_to_evidence(candidate) for candidate in retrieval_result.candidates[:3]
-        ]
         if not retrieval_result.candidates:
+            # if there are no candidates, then we probably want to make a new candidate
             return ResolutionDecision(
                 mention_entity_id=mention.entity_id,
-                decision_status="abstain",
+                decision_status="new_candidate",
                 decision_score=0.0,
                 reason_codes=["no_candidates"],
                 selected_candidate_key=None,
-                top_candidates=evidence,
+                top_candidates=[],
             )
-
+        evidence = [
+            _candidate_to_evidence(candidate) for candidate in retrieval_result.candidates[:3]
+        ]
         top_candidate = retrieval_result.candidates[0]
         score = top_candidate.fused_score
         if score >= self.linked_threshold:
+            # we're confident the link is correct, so we don't need to review candidacy
             return ResolutionDecision(
                 mention_entity_id=mention.entity_id,
                 decision_status="linked",
@@ -156,21 +157,12 @@ class DeterministicEntityJudge:
                 selected_candidate_key=top_candidate.canonical_entity_key,
                 top_candidates=evidence,
             )
-        if score >= self.new_candidate_threshold:
-            return ResolutionDecision(
-                mention_entity_id=mention.entity_id,
-                decision_status="needs_review",
-                decision_score=score,
-                reason_codes=["threshold_review"],
-                selected_candidate_key=None,
-                top_candidates=evidence,
-            )
-        if _is_valid_new_candidate(mention):
+        elif _is_valid_new_candidate(mention):
             return ResolutionDecision(
                 mention_entity_id=mention.entity_id,
                 decision_status="new_candidate",
                 decision_score=score,
-                reason_codes=["threshold_new_candidate"],
+                reason_codes=["threshold_review"],
                 selected_candidate_key=None,
                 top_candidates=evidence,
             )

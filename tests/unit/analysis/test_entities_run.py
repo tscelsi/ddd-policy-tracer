@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-from ddd_policy_tracer.analysis.entities import RobustEnsembleEntityExtractor
 from ddd_policy_tracer.analysis.entities.run import (
     _build_parser,
     _configure_logging,
@@ -76,13 +75,6 @@ def test_build_parser_rejects_legacy_extractor_choices() -> None:
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--chunk-id", "chunk_1", "--extractor", "rule"])
-
-
-def test_robust_ensemble_extractor_default_wiring_type() -> None:
-    """Use robust ensemble extractor as the only runtime strategy."""
-    extractor = RobustEnsembleEntityExtractor()
-
-    assert isinstance(extractor, RobustEnsembleEntityExtractor)
 
 
 def test_run_bulk_executes_entities_service_wiring_for_all_chunks(tmp_path: Path) -> None:

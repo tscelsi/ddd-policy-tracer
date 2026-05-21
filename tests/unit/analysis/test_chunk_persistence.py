@@ -12,7 +12,7 @@ from ddd_policy_tracer.analysis.chunks.adapters import (
 )
 from ddd_policy_tracer.analysis.chunks.chunking import SpacyChunker
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
-from ddd_policy_tracer.discovery.domain import SourceDocumentVersion
+from ddd_policy_tracer.discovery.domain import SourceDocument
 
 
 def _sample_version(
@@ -20,9 +20,9 @@ def _sample_version(
     source_document_id: str = "https://example.org/report-1",
     checksum: str = "checksum-1",
     text: str = "A" * 64,
-) -> SourceDocumentVersion:
+) -> SourceDocument:
     """Build one representative source document version fixture."""
-    return SourceDocumentVersion(
+    return SourceDocument(
         source_id="australia_institute",
         source_document_id=source_document_id,
         source_url=f"{source_document_id}/",
