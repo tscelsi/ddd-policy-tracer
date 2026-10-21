@@ -27,6 +27,15 @@
   - Operator interface: CLI chunk/extract commands.
   - Downstream: knowledge graph materialization and analyst query services.
 
+### Retrieval (new, minimal v1)
+- Responsibility: Ingest `SourceDocument` and `DocumentChunk` records into a graph database and answer similarity queries using chunk embedding vectors.
+- Owns language: Graph Store, Chunk Embedding, Retrieval Query, Similarity Score, SourceDocument node, DocumentChunk node.
+- Does not own: extraction, canonicalization, or policy judgment beyond ranking matched chunks.
+- Integrations:
+  - Upstream from Document Acquisition and Analysis chunk persistence.
+  - Persistence adapter: FalkorDB graph instance for node/edge storage.
+  - Retrieval operations: cosine-similarity ranking over `chunk.embeddings`.
+
 ## Context map (draft)
 
 - External Source Web (Australia Institute) -> Document Acquisition: sitemap and document retrieval over HTTP (anti-corruption via source adapter + URL/content filters).
@@ -38,6 +47,8 @@
 - Analysis -> Chunk Persistence Adapter: persist `DocumentChunk` records for each document version.
 - Analysis -> Extraction Persistence Adapter: persist `ClaimCandidate` and `EntityMention` records.
 - Analysis -> Future Graph Context: emit graph-ready assertions and provenance metadata.
+- Retrieval -> FalkorDB Graph Store: persist `SourceDocument` and `DocumentChunk` nodes with `HAS_CHUNK` relationships and chunk embedding properties.
+- Retrieval -> Similarity Query Service: rank stored `DocumentChunk` nodes by cosine similarity against a query embedding.
 
 ## Aggregate candidates
 
@@ -46,6 +57,12 @@
 | --- | --- | --- | --- |
 | SourceDocument | Represent a source-scoped acquired document with versions, provenance, normalized text, and processing status. | `source_document_id` is normalized URL and stable within source; `done` requires non-empty `normalized_text` and no uncaught exceptions; each checksum change under same identity creates a new append-only version; each version must persist both `raw_content_ref` and normalized record; each version should persist `published_at` from sitemap `<lastmod>` when available; each version persists audit timestamps (`retrieved_at`, `created_at`, `updated_at`). | Per source identity + version append operation.
 | AcquisitionRun | Represent a single manual execution boundary with outcome and counts. | Run has `source_id`, `started_at`; completion sets terminal run status (`completed`, `completed_with_failures`, `failed`) and `finished_at`; bulk ingestion allows partial per-URL success/failure. | Per run lifecycle and aggregate counters/status.
+
+### Retrieval
+| Aggregate root | Purpose | Invariants | Consistency boundary |
+| --- | --- | --- | --- |
+| SourceDocument Graph Node | Represent an ingested source document as a graph node with provenance and text metadata. | Node key is `source_document_id`; one document node may own many chunk nodes; metadata must remain linked to the originating source version. | Per document identity in the graph.
+| DocumentChunk Graph Node | Represent one chunk snapshot and its semantic embedding. | `chunk_id` is unique; a `chunk.embedding` array is optional but required for semantic search; each chunk must reference its parent source document via `HAS_CHUNK`. | Per chunk identity and parent document relationship.
 
 ## Commands and domain events (candidates)
 

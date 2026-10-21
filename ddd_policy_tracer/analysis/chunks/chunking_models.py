@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -25,3 +25,4 @@ class DocumentChunk:
     start_char: int
     end_char: int
     chunk_text: str
+    embeddings: list[float] = field(default_factory=list)

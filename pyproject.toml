@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.28.1",
     "nltk>=3.9.4",
     "fastcoref>=2.1.6",
+    "falkordb>=1.2.2",
     "pydantic>=2.13.3",
     "protobuf>=6.33.0",
     "pypdf>=6.10.2",

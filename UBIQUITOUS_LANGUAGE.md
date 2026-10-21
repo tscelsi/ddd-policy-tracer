@@ -16,6 +16,8 @@
 | Evidence Span | The start/end character offsets in chunk text that justify an extraction or stance. | Quote | No |
 | Extraction Lineage | Metadata that identifies extractor implementation/model version and run timestamp for repeatability. | Audit note | No |
 | Hybrid Retrieval | Retrieval approach combining vector similarity over chunks with graph traversal for relationship reasoning. | RAG (as sole term) | Yes |
+| Chunk Embedding | Numeric vector representation attached to a `DocumentChunk` so semantic retrieval can compare text similarity. | embedding vector, vector representation | No |
+| Graph Store | Port abstraction for persisting document/chunk graph nodes and querying similarity over embeddings. | database layer, graph DB | No |
 
 ### Supporting terms
 
