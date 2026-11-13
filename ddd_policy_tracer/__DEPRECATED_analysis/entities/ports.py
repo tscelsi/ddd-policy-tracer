@@ -1,0 +1,50 @@
+"""Ports for entities bounded context orchestration dependencies."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+from ddd_policy_tracer.enrichment.chunking.models import DocumentChunk
+
+from .models import EntityMention
+
+
+@dataclass(frozen=True)
+class ExtractionMetrics:
+    """Represent extractor metrics used by service reporting and events."""
+
+    processed_sentences: int
+
+
+class ChunkRepository(Protocol):
+    """Load chunks by identity for entity extraction workflows."""
+
+    def get_chunk(self, *, chunk_id: str) -> DocumentChunk | None:
+        """Return one chunk for extraction or none when missing."""
+
+    def list_chunk_ids(self) -> list[str]:
+        """Return all unique chunk identifiers available for extraction."""
+
+
+class EntityMentionRepository(Protocol):
+    """Persist extracted entity mentions."""
+
+    def add_entities(self, entities: list[EntityMention]) -> int:
+        """Persist entity mentions and return inserted mention count."""
+
+    def list_entities(self, *, chunk_id: str | None = None) -> list[EntityMention]:
+        """Load persisted entity mentions, optionally by chunk identity."""
+
+
+class EntityExtractor(Protocol):
+    """Extract entity mentions from one source chunk."""
+
+    def extract(self, *, chunk: DocumentChunk) -> list[EntityMention]:
+        """Return extracted entity mentions for one chunk."""
+
+    def extract_many(self, *, chunks: list[DocumentChunk]) -> list[EntityMention]:
+        """Return extracted entity mentions for many chunks."""
+
+    def count_processed_sentences(self, *, chunk: DocumentChunk) -> int:
+        """Return number of processed sentences for one chunk."""

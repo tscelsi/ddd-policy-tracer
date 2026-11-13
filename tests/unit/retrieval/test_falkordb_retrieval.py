@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
 from ddd_policy_tracer.discovery.domain import SourceDocument
-from ddd_policy_tracer.retrieval.service_layer import ChunkEmbeddingRetriever, GraphIngestionService
+from ddd_policy_tracer.__DEPRECATED_retrieval.service_layer import ChunkEmbeddingRetriever, GraphIngestionService
 
 
 class InMemoryGraphStore:

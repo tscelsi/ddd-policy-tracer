@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import sqrt
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
-from ddd_policy_tracer.discovery.domain import SourceDocument
+from ddd_policy_tracer.ingestion.domain import SourceDocument
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class GraphStore(Protocol):
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Return the top similar chunks for a given embedding."""
+        ...
 
 
 class GraphIngestionService:
@@ -213,7 +215,7 @@ class FalkorDBGraphStore:
                     "source_document_id": row["source_document_id"],
                     "chunk_text": row["chunk_text"],
                     "similarity": similarity,
-                }
+                },
             )
         matches.sort(key=lambda item: float(item["similarity"]), reverse=True)
         return matches[:limit]
