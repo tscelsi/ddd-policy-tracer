@@ -6,8 +6,8 @@ import json
 from io import StringIO
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities.models import EntityMention
-from ddd_policy_tracer.analysis.entities.review_queue import SQLiteReviewQueueRepository
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.models import EntityMention
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.review_queue import SQLiteReviewQueueRepository
 from ddd_policy_tracer.cli import run_cli
 
 

@@ -9,9 +9,9 @@ from pypdf.generic import (
     NameObject,
 )
 
-from ddd_policy_tracer.discovery.adapters import (
+from ddd_policy_tracer.ingestion.adapters import (
     extract_pdf_urls_from_report_html,
-    extract_text_from_pdf_bytes,
+    pdf_text_to_md_australia_institute,
 )
 
 
@@ -76,6 +76,6 @@ def test_extract_text_from_pdf_bytes_returns_page_text() -> None:
     """Read plain text content from a valid one-page PDF byte payload."""
     pdf_bytes = _build_pdf_with_text("Tax reform outcomes")
 
-    extracted = extract_text_from_pdf_bytes(pdf_bytes)
+    extracted = pdf_text_to_md_australia_institute(pdf_bytes)
 
     assert "Tax reform outcomes" in extracted

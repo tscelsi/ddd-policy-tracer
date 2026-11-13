@@ -2,9 +2,9 @@
 
 import pytest
 
-from ddd_policy_tracer.analysis import ChunkingConfig
-from ddd_policy_tracer.analysis.chunks.chunking import SpacyChunker
-from ddd_policy_tracer.discovery.domain import SourceDocument
+from ddd_policy_tracer.__DEPRECATED_analysis import ChunkingConfig
+from ddd_policy_tracer.enrichment.chunking.chunking import SpacyChunker
+from ddd_policy_tracer.ingestion.domain import SourceDocument
 
 
 def _sample_version(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ddd_policy_tracer.analysis.silver_dataset import (
+from ddd_policy_tracer.__DEPRECATED_analysis.silver_dataset import (
     deterministic_sample_records,
     deterministic_split_records,
     validate_claim_silver_record,

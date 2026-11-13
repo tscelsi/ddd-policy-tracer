@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.claims import (
+from ddd_policy_tracer.__DEPRECATED_analysis.claims import (
     LLMClaimExtractor,
     OllamaClaimExtractor,
     RuleBasedSentenceClaimExtractor,
 )
-from ddd_policy_tracer.analysis.claims.run import _build_extractor, _load_chunk_ids
+from ddd_policy_tracer.__DEPRECATED_analysis.claims.run import _build_extractor, _load_chunk_ids
 
 
 def test_build_extractor_returns_rule_based_strategy() -> None:

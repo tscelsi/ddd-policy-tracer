@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.canonicalization.run import run_entities
-from ddd_policy_tracer.analysis.entities import import_seed_catalog
-from ddd_policy_tracer.analysis.entities.run import run
-from ddd_policy_tracer.analysis.graph.run import run as run_graph
+from ddd_policy_tracer.__DEPRECATED_analysis.canonicalization.run import run_entities
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import import_seed_catalog
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.run import run
+from ddd_policy_tracer.__DEPRECATED_analysis.graph.run import run as run_graph
 
 
 def _write_chunk(path: Path, *, chunk_id: str, text: str) -> None:

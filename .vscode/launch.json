@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Acquire Lowy",
+      "name": "acquire",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
@@ -12,18 +12,64 @@
       "args": [
         "acquire",
         "--source",
-        "lowy_institute",
+        "australia_institute",
         "--state-path",
-        "data/acquisition.jsonl",
+        "data/acquisition2.jsonl",
         "--repository-backend",
         "filesystem",
         "--artifact-dir",
-        "data/artifacts",
+        "data/artifacts2",
         "--limit",
         "5",
         "--log-level",
         "info"
       ]
-    }
+    },
+    {
+      "name": "chunk",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "chunk",
+        "--source",
+        "hansard",
+        "--state-path",
+        "data/documents_new2.jsonl",
+      ]
+    },
+    {
+      "name": "Entity Extraction & Resolution",
+      "type": "python",
+      "request": "launch",
+      "module": "ddd_policy_tracer.analysis.entities.run",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--chunk-id",
+        "chunk_8fdc70bf561235e0",
+        "--chunk-state-path",
+        "data/chunks_spacy.jsonl",
+        "--entity-state-path",
+        "data/entities_sm.jsonl",
+        "--db-path",
+        "data/catalog.db",
+        "--log-level",
+        "INFO"
+      ]
+    },
+    {
+      "name": "topic classification",
+      "type": "python",
+      "request": "launch",
+      "module": "ddd_policy_tracer.analysis.enrichment.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+    },
   ]
 }

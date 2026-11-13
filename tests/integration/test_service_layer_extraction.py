@@ -17,8 +17,8 @@ from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from pytest_httpx import HTTPXMock
 
-from ddd_policy_tracer.discovery import ingest_source_documents
-from ddd_policy_tracer.discovery.adapters import DiscoveredDocument
+from ddd_policy_tracer.ingestion import ingest_source_documents
+from ddd_policy_tracer.ingestion.adapters import DiscoveredDocument
 
 # ---------------------------------------------------------------------------
 # Shared PDF / HTML builders

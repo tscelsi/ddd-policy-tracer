@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities import FilesystemChunkRepository
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import FilesystemChunkRepository
 
 
 def _write_chunk_record(*, path: Path, chunk_id: str) -> None:

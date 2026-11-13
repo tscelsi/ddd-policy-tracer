@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities.run import run
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.run import run
 
 
 def _write_chunk(path: Path, *, chunk_id: str, text: str) -> None:
@@ -48,7 +48,7 @@ def test_run_applies_resolution_metadata_when_catalog_inputs_are_provided(tmp_pa
     )
     _write_seed(seed_path)
 
-    from ddd_policy_tracer.analysis.entities import import_seed_catalog
+    from ddd_policy_tracer.__DEPRECATED_analysis.entities import import_seed_catalog
 
     import_seed_catalog(
         seed_path=seed_path,

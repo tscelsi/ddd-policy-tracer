@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities import HybridCatalogRetriever, import_seed_catalog
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import HybridCatalogRetriever, import_seed_catalog
 
 
 def _write_seed(path: Path) -> None:

@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
-from ddd_policy_tracer.analysis.claims import (
+from ddd_policy_tracer.enrichment.chunking.models import DocumentChunk
+from ddd_policy_tracer.__DEPRECATED_analysis.claims import (
     OllamaClaimExtractor,
     OllamaClaimExtractorConfig,
 )

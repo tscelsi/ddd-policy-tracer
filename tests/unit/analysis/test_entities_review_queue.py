@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities import EntityMention
-from ddd_policy_tracer.analysis.entities.review_queue import SQLiteReviewQueueRepository
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import EntityMention
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.review_queue import SQLiteReviewQueueRepository
 
 
 def _mention(*, entity_id: str, status: str) -> EntityMention:

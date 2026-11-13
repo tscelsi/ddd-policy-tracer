@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ddd_policy_tracer.analysis.entities.run import run_bulk
-from ddd_policy_tracer.analysis.entities import extractors as entities_extractors
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.run import run_bulk
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import extractors as entities_extractors
 
 
 @dataclass

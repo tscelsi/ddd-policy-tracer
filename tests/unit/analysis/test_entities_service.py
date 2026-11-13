@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
-from ddd_policy_tracer.analysis.entities import EntitiesService, EntityMention
+from ddd_policy_tracer.enrichment.chunking.models import DocumentChunk
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import EntitiesService, EntityMention
 
 
 @dataclass

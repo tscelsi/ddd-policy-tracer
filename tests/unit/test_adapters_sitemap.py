@@ -1,6 +1,6 @@
 """Unit tests for sitemap discovery adapter behavior."""
 
-from ddd_policy_tracer.discovery.adapters import discover_sitemap_entries
+from ddd_policy_tracer.ingestion.adapters import discover_sitemap_entries
 
 
 def test_discover_sitemap_entries_reads_loc_and_lastmod() -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities import EntityMention, FilesystemEntityRepository
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import EntityMention, FilesystemEntityRepository
 
 
 def _sample_entity(*, entity_id: str = "entity_1") -> EntityMention:

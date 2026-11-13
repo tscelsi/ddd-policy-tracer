@@ -15,18 +15,18 @@ from pypdf.generic import (
 )
 from pytest_httpx import HTTPXMock
 
-from ddd_policy_tracer.discovery import (
+from ddd_policy_tracer.ingestion import (
     AcquisitionReport,
     get_source_document_versions,
 )
-from ddd_policy_tracer.discovery import (
+from ddd_policy_tracer.ingestion import (
     ingest_source_documents as _ingest_source_documents,
 )
-from ddd_policy_tracer.discovery.adapters import (
+from ddd_policy_tracer.ingestion.adapters import (
     DiscoveredDocument,
     discover_sitemap_entries,
 )
-from ddd_policy_tracer.discovery.source_strategies import (
+from ddd_policy_tracer.ingestion.source_strategies import (
     SkipSourceDocumentError,
 )
 

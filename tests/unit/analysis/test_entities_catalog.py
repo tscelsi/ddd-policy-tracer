@@ -6,13 +6,13 @@ import json
 import sqlite3
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities.catalog import (
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.catalog import (
     get_catalog_metadata,
     import_seed_catalog,
     promote_review_items,
 )
-from ddd_policy_tracer.analysis.entities.models import EntityMention
-from ddd_policy_tracer.analysis.entities.review_queue import SQLiteReviewQueueRepository
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.models import EntityMention
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.review_queue import SQLiteReviewQueueRepository
 
 
 def _write_seed(path: Path) -> None:

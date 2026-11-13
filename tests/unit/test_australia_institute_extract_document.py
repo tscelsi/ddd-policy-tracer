@@ -20,7 +20,7 @@ from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from pytest_httpx import HTTPXMock
 
-from ddd_policy_tracer.discovery.source_strategies import (
+from ddd_policy_tracer.ingestion.source_strategies import (
     AustraliaInstituteSourceStrategy,
     ExtractedSourceDocument,
     SkipSourceDocumentError,

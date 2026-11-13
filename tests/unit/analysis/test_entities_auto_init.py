@@ -6,8 +6,8 @@ import json
 import sqlite3
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities.retrieval import HybridCatalogRetriever
-from ddd_policy_tracer.analysis.entities.review_queue import SQLiteReviewQueueRepository
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.retrieval import HybridCatalogRetriever
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.review_queue import SQLiteReviewQueueRepository
 
 
 def test_hybrid_retriever_auto_initializes_catalog_tables(tmp_path: Path) -> None:

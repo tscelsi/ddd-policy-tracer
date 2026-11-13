@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ddd_policy_tracer.analysis.graph.run import run
+from ddd_policy_tracer.__DEPRECATED_analysis.graph.run import run
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:

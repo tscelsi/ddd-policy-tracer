@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from ddd_policy_tracer.analysis.entities import EntityMention
-from ddd_policy_tracer.analysis.entities.resolution import (
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import EntityMention
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.resolution import (
     CatalogEligibilityPolicy,
     DeterministicEntityJudge,
     apply_resolution_decision,
 )
-from ddd_policy_tracer.analysis.entities.retrieval import RetrievalCandidate, RetrievalResult
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.retrieval import RetrievalCandidate, RetrievalResult
 
 
 def _mention(

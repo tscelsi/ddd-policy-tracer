@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 from pytest_httpx import HTTPXMock
 
-from ddd_policy_tracer.discovery.source_strategies import (
+from ddd_policy_tracer.ingestion.source_strategies import (
     ExtractedSourceDocument,
     LowyInstituteSourceStrategy,
     SkipSourceDocumentError,

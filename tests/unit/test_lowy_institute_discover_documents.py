@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ddd_policy_tracer.discovery.source_strategies import (
+from ddd_policy_tracer.ingestion.source_strategies import (
     LowyInstituteSourceStrategy,
 )
 

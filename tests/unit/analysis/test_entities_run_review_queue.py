@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ddd_policy_tracer.analysis.entities import import_seed_catalog
-from ddd_policy_tracer.analysis.entities.review_queue import SQLiteReviewQueueRepository
-from ddd_policy_tracer.analysis.entities.run import run
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import import_seed_catalog
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.review_queue import SQLiteReviewQueueRepository
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.run import run
 
 
 def _write_chunk(path: Path, *, chunk_id: str, text: str) -> None:

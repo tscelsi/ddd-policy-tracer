@@ -9,8 +9,8 @@ import pytest
 from sklearn.dummy import DummyClassifier
 from sklearn.feature_extraction import DictVectorizer
 
-from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
-from ddd_policy_tracer.analysis.claims import MLClaimExtractor, MLClaimExtractorConfig
+from ddd_policy_tracer.enrichment.chunking.models import DocumentChunk
+from ddd_policy_tracer.__DEPRECATED_analysis.claims import MLClaimExtractor, MLClaimExtractorConfig
 
 
 def _chunk(text: str) -> DocumentChunk:

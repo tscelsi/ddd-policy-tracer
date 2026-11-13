@@ -7,12 +7,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
-from ddd_policy_tracer.analysis.entities import (
+from ddd_policy_tracer.enrichment.chunking.models import DocumentChunk
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import (
     SpacyEntityExtractor,
     SpacyEntityExtractorConfig,
 )
-from ddd_policy_tracer.analysis.entities import extractors as entity_extractors_module
+from ddd_policy_tracer.__DEPRECATED_analysis.entities import extractors as entity_extractors_module
 
 
 @dataclass(frozen=True)

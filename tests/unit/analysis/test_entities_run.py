@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-from ddd_policy_tracer.analysis.entities.run import (
+from ddd_policy_tracer.__DEPRECATED_analysis.entities.run import (
     _build_parser,
     _configure_logging,
     run,

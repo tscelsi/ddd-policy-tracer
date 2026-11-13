@@ -15,8 +15,8 @@ from pypdf.generic import (
     NameObject,
 )
 
-from ddd_policy_tracer.discovery import get_source_document_versions
-from ddd_policy_tracer.discovery.cli import run_cli as _run_cli
+from ddd_policy_tracer.ingestion import get_source_document_versions
+from ddd_policy_tracer.ingestion.cli import run_cli as _run_cli
 
 
 def run_cli(

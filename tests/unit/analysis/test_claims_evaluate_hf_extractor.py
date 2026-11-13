@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ddd_policy_tracer.analysis.chunks.chunking_models import DocumentChunk
-from ddd_policy_tracer.analysis.claims.ml.evaluate_hf_extractor import run
+from ddd_policy_tracer.enrichment.chunking.models import DocumentChunk
+from ddd_policy_tracer.__DEPRECATED_analysis.claims.ml.evaluate_hf_extractor import run
 
 
 def _write_dataset(path: Path) -> None:
