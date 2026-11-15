@@ -175,3 +175,17 @@ Each PR or handoff should state:
 - Focus on behavior and intent (`why/what`), not line-by-line implementation details (`how`).
 - Add argument/return detail only when it is non-obvious from type hints and naming.
 - Keep comments current: update docstrings whenever behavior changes.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo: read the root `GLOSSARY.md` and relevant ADRs in `docs/adr/` when present. See `docs/agents/domain.md`.

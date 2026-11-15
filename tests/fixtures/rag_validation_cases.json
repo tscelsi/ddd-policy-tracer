@@ -1,0 +1,320 @@
+{
+  "version": 1,
+  "status": "draft_for_human_review",
+  "source_database": "data/new3.db",
+  "corpus_coverage": "The inspected database contains Hansard chunks dated in 2025 only.",
+  "annotation_notes": [
+    "Gold chunk IDs are candidate supporting evidence, not an adjudicated exhaustive relevance set.",
+    "Review every question, answerability label, answer point, and evidence reference before using the cases for reported metrics.",
+    "For comparison and chronology cases, all listed chunks are intended to be retrieved to support the requested synthesis.",
+    "The database stores speaker and topic data in chunk metadata; date, house, and chamber are encoded in source_document_id rather than explicit filter columns."
+  ],
+  "cases": [
+    {
+      "case_id": "speaker-haines-childcare",
+      "family": "speaker_lookup",
+      "question": "What reasons does Helen Haines give for supporting the Early Childhood Education and Care (Three Day Guarantee) Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_02e8835a9a66cc2a"],
+      "expected_answer_points": [
+        "The bill is a step toward ensuring children and parents can access the childcare they need.",
+        "Haines argues that childcare benefits children and parents and that an accessible, affordable system has broad benefits."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "speaker-ley-energy",
+      "family": "speaker_lookup",
+      "question": "What two energy-policy goals does Sussan Ley say can be achieved together?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_1429f50a242aa59a"],
+      "expected_answer_points": [
+        "Affordable energy.",
+        "Responsible emissions reduction."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "speaker-wong-climate",
+      "family": "speaker_lookup",
+      "question": "What actions does Penny Wong say are being taken in response to climate impacts on South Australian beaches?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_36c2edd00f9d61d4"],
+      "expected_answer_points": [
+        "Restore and protect beaches.",
+        "Support people economically affected.",
+        "Take action on climate change."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "speaker-witty-housing",
+      "family": "speaker_lookup",
+      "question": "What housing measures does Sarah Witty say the government is taking?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_0e8742602702e417"],
+      "expected_answer_points": [
+        "Build more homes.",
+        "Support renters.",
+        "Invest in social and affordable housing."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "speaker-outside-coverage-2024",
+      "family": "speaker_lookup",
+      "question": "What did Helen Haines say about childcare during a 2024 parliamentary speech?",
+      "answerable": false,
+      "gold_evidence_chunk_ids": [],
+      "abstention_reason": "The inspected database contains speech chunks dated in 2025 only; it cannot establish what was said in a 2024 speech.",
+      "review_status": "draft"
+    },
+    {
+      "case_id": "debate-tyrrell-fair-work",
+      "family": "debate_discovery",
+      "question": "What concern does Tammy Tyrrell raise while supporting the Fair Work Amendment (Protecting Penalty and Overtime Rates) Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_09b0dd32d3a22504"],
+      "expected_answer_points": [
+        "Tyrrell says she supports the bill and will vote for it.",
+        "She says the Senate has not been given a regulatory impact statement that would explain the predicted impact of the rule changes."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "debate-chaney-environment-reform",
+      "family": "debate_discovery",
+      "question": "How does Kate Chaney frame the Environment Protection Reform Bill 2025 and what aspects does she say she will examine?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_09bc923bed7207b2"],
+      "expected_answer_points": [
+        "She describes the bill package as long-awaited reforms to address flawed environmental laws.",
+        "She says she will discuss positive parts of the bills as well as concerning loopholes that could undermine their effectiveness."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "debate-haines-repeal-net-zero",
+      "family": "debate_discovery",
+      "question": "Why does Helen Haines oppose the Repeal Net Zero Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_4d736f34c9f42d64"],
+      "expected_answer_points": [
+        "Haines says the bill would unravel Australia's emissions-reduction framework without putting an alternative in place."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "debate-gee-early-education-regulation",
+      "family": "debate_discovery",
+      "question": "What reason does Andrew Gee give for supporting the Early Childhood Education and Care (Strengthening Regulation of Early Education) Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_d3a5ff0a0aa4a583"],
+      "expected_answer_points": [
+        "Gee explicitly supports the bill.",
+        "He connects the bill to alleged crimes against vulnerable children and the need for stronger regulation."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "debate-outside-coverage-2026",
+      "family": "debate_discovery",
+      "question": "What was the final parliamentary vote on the Repeal Net Zero Bill in 2026?",
+      "answerable": false,
+      "gold_evidence_chunk_ids": [],
+      "abstention_reason": "The inspected database contains speech chunks dated in 2025 only and cannot establish a 2026 vote or outcome.",
+      "review_status": "draft"
+    },
+    {
+      "case_id": "comparison-repeal-net-zero",
+      "family": "comparison",
+      "question": "How do Helen Haines and Rick Wilson differ in their stated positions and reasoning on the Repeal Net Zero Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_4d736f34c9f42d64",
+        "chunk_92b1eb017de9fac1"
+      ],
+      "expected_answer_points": [
+        "Haines opposes the bill, saying it would remove the emissions-reduction framework without a replacement.",
+        "Wilson supports the bill and cites the effect of net-zero policies on nickel mining in his electorate."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "comparison-housing",
+      "family": "comparison",
+      "question": "Compare Sarah Witty's description of the government's housing actions with Richard Colbeck's housing-policy criticism.",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_0e8742602702e417",
+        "chunk_e5c89fdaed84b2cb"
+      ],
+      "expected_answer_points": [
+        "Witty emphasizes building homes, renter support, and social and affordable housing investment.",
+        "Colbeck criticizes the government over its earlier promise of cheaper housing and says housing has not become cheaper."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "comparison-environment-bill",
+      "family": "comparison",
+      "question": "How do Kate Chaney and Zali Steggall characterize the Environment Protection Reform Bill debate?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_09bc923bed7207b2",
+        "chunk_e93af0fdcc178235"
+      ],
+      "expected_answer_points": [
+        "Chaney describes the package as long-awaited reform while noting both positive aspects and potentially harmful loopholes.",
+        "Steggall expresses disappointment with the government's process and criticizes what she calls greenwashing in the debate."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "comparison-childcare-bills",
+      "family": "comparison",
+      "question": "Compare Helen Haines's stated rationale for the Three Day Guarantee Bill with Andrew Gee's rationale for the Strengthening Regulation of Early Education Bill.",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_02e8835a9a66cc2a",
+        "chunk_d3a5ff0a0aa4a583"
+      ],
+      "expected_answer_points": [
+        "Haines focuses on access to affordable childcare and benefits for children and parents.",
+        "Gee focuses on protecting vulnerable children and strengthening regulation."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "comparison-outside-corpus-polling",
+      "family": "comparison",
+      "question": "According to national polling, what percentage of Australians supported each side of the Repeal Net Zero Bill debate?",
+      "answerable": false,
+      "gold_evidence_chunk_ids": [],
+      "abstention_reason": "The chunk corpus contains parliamentary speeches, not a representative national poll dataset; do not infer public support from members' claims.",
+      "review_status": "draft"
+    },
+    {
+      "case_id": "chronology-colbeck-housing",
+      "family": "chronology",
+      "question": "What housing criticisms does Richard Colbeck raise in July and later in October 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_e5c89fdaed84b2cb",
+        "chunk_d94cc35a3b53718b"
+      ],
+      "expected_answer_points": [
+        "In July, Colbeck says the promised cheaper housing has not materialized.",
+        "In October, he criticizes the government's housing spending and its implications."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "chronology-ley-energy",
+      "family": "chronology",
+      "question": "What themes about energy and household costs does Sussan Ley raise in her speeches on 25 and 27 November 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_1429f50a242aa59a",
+        "chunk_8fa6a08aa284f26a"
+      ],
+      "expected_answer_points": [
+        "On 25 November, Ley says affordable energy and responsible emissions reduction can coexist.",
+        "On 27 November, she criticizes higher power prices and cost-of-living pressures."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "chronology-waters-climate",
+      "family": "chronology",
+      "question": "What does Larissa Waters emphasize about climate policy in July and about climate-risk information in October 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_a5df6cc42a710573",
+        "chunk_608236b1256c93e5"
+      ],
+      "expected_answer_points": [
+        "In July, Waters opposes a motion associated with opposition to net zero and argues for more urgent emissions action.",
+        "In October, she discusses the disclosure of a climate-risk report and its findings."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "chronology-repeal-net-zero-debate",
+      "family": "chronology",
+      "question": "What contrasting arguments appear in the Repeal Net Zero Bill debate in late October and late November 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": [
+        "chunk_1cbfa386bfe24673",
+        "chunk_4d736f34c9f42d64"
+      ],
+      "expected_answer_points": [
+        "In October, Fiona Phillips defends the government's net-zero goal and criticizes the bill's proponents' characterization of it.",
+        "In November, Helen Haines opposes the bill on the ground that it removes an emissions framework without a replacement."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "chronology-private-motive",
+      "family": "chronology",
+      "question": "When did a member change their mind on net zero because of private pressure from their party?",
+      "answerable": false,
+      "gold_evidence_chunk_ids": [],
+      "abstention_reason": "A causal claim about private pressure or a change of mind cannot be established unless the speeches explicitly state it; do not infer motives from dated differences or party affiliation.",
+      "review_status": "draft"
+    },
+    {
+      "case_id": "stance-canavan-super-gap",
+      "family": "explicit_stance",
+      "question": "Does Matthew Canavan explicitly state support for or opposition to the Superannuation Legislation Amendment (Tackling the Gender Super Gap) Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_fcc72f62477c3768"],
+      "expected_answer_points": [
+        "Canavan explicitly states support for the bill."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "stance-tyrrell-fair-work",
+      "family": "explicit_stance",
+      "question": "What position does Tammy Tyrrell explicitly state on the Fair Work Amendment (Protecting Penalty and Overtime Rates) Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_09b0dd32d3a22504"],
+      "expected_answer_points": [
+        "Tyrrell explicitly supports the bill and says she will vote in favour, while also raising a concern about the missing impact statement."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "stance-wilson-net-zero",
+      "family": "explicit_stance",
+      "question": "Does Rick Wilson state support for or opposition to the Repeal Net Zero Bill 2025?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_92b1eb017de9fac1"],
+      "expected_answer_points": [
+        "Wilson explicitly says he is speaking in support of the bill."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "stance-waters-motion",
+      "family": "explicit_stance",
+      "question": "What position does Larissa Waters explicitly state on the climate-related motion in her 28 July 2025 speech?",
+      "answerable": true,
+      "gold_evidence_chunk_ids": ["chunk_a5df6cc42a710573"],
+      "expected_answer_points": [
+        "Waters explicitly says she opposes the motion."
+      ],
+      "review_status": "draft"
+    },
+    {
+      "case_id": "stance-outside-coverage-2024",
+      "family": "explicit_stance",
+      "question": "Did Helen Haines explicitly support or oppose the Three Day Guarantee Bill in a 2024 parliamentary speech?",
+      "answerable": false,
+      "gold_evidence_chunk_ids": [],
+      "abstention_reason": "The inspected database contains speech chunks dated in 2025 only; it cannot establish the contents of a 2024 speech.",
+      "review_status": "draft"
+    }
+  ]
+}

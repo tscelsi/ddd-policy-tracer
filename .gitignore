@@ -17,3 +17,4 @@ data/
 
 *.json
 *.jsonl
+!tests/fixtures/rag_validation_cases.json
