@@ -95,6 +95,24 @@ def retrieve_ranked_evidence(
     if candidate_limit is not None and candidate_limit <= 0:
         raise ValueError("candidate_limit must be greater than zero")
 
+    query_embedding = embed_query(query, embedding_service=embedding_service)
+    return retriever.search_hybrid(
+        query=query,
+        query_embedding=query_embedding,
+        limit=limit,
+        candidate_limit=candidate_limit,
+    )
+
+
+def embed_query(
+    query: str,
+    *,
+    embedding_service: QueryEmbedder,
+) -> list[float]:
+    """Validate a question and return its numeric query embedding."""
+    if not query.strip():
+        raise ValueError("query must not be empty")
+
     embedded_query = embedding_service.embed_one(query, prompt_name="query")
     if isinstance(embedded_query, Tensor):
         embedded_query = embedded_query.tolist()
@@ -106,9 +124,4 @@ def retrieve_ranked_evidence(
     if not query_embedding:
         raise ValueError("embedding_service returned an empty query embedding")
 
-    return retriever.search_hybrid(
-        query=query,
-        query_embedding=query_embedding,
-        limit=limit,
-        candidate_limit=candidate_limit,
-    )
+    return query_embedding

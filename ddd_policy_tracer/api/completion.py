@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from ollama import ResponseError
+from openai import APIError as OpenAIError
 from pydantic import BaseModel, ConfigDict, Field
 
 from ddd_policy_tracer.answering.completion_service import RagCompletionService
@@ -87,20 +89,44 @@ router = APIRouter(tags=["completion"])
 def create_completion(
     payload: CompletionRequest,
     completion_service: Annotated[RagCompletionService, Depends(get_completion_service)],
+    response: Response,
 ) -> CompletionResponse:
     """Retrieve speech evidence and return an answer with source-backed citations."""
+    request_started = perf_counter()
     try:
-        answer = completion_service.complete(payload.question, limit=payload.limit)
+        run = completion_service.complete(payload.question, limit=payload.limit)
     except ValueError as exc:
         logger.exception("Answer generation failed due to invalid input")
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
-    except (httpx.HTTPError, ResponseError) as exc:
+    except (httpx.HTTPError, OpenAIError, ResponseError) as exc:
         logger.exception("Answer generation provider is unavailable")
         raise HTTPException(
             status_code=503,
             detail="The answer generation provider is unavailable.",
         ) from exc
-    return CompletionResponse.from_answer(answer)
+    completion_response = CompletionResponse.from_answer(run.answer)
+    total_ms = (perf_counter() - request_started) * 1000
+    timings = run.timings
+    response.headers["Server-Timing"] = ", ".join(
+        (
+            f"embedding;dur={timings.embedding_ms:.3f}",
+            f"hybrid_retrieval;dur={timings.hybrid_retrieval_ms:.3f}",
+            f"generation;dur={timings.generation_ms:.3f}",
+            f"completion;dur={total_ms:.3f}",
+        ),
+    )
+    logger.info(
+        "completion_timing",
+        extra={
+            "embedding_ms": timings.embedding_ms,
+            "hybrid_retrieval_ms": timings.hybrid_retrieval_ms,
+            "generation_ms": timings.generation_ms,
+            "completion_ms": total_ms,
+            "evidence_count": run.evidence_count,
+            "abstained": run.answer.abstained,
+        },
+    )
+    return completion_response

@@ -6,11 +6,16 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from ollama import ChatResponse, Message
+from openai import APIConnectionError
 
-from ddd_policy_tracer.answering.completion_service import RagCompletionService
+from ddd_policy_tracer.answering.completion_service import (
+    CompletionRun,
+    RagCompletionService,
+)
 from ddd_policy_tracer.answering.ollama_generator import OllamaAnswerGenerator
 from ddd_policy_tracer.answering.service_layer import (
     AnswerSynthesizer,
@@ -138,4 +143,40 @@ def test_completion_runs_retrieval_and_returns_cited_answer() -> None:
             },
         ],
     }
+    server_timing = response.headers["server-timing"]
+    assert "embedding;dur=" in server_timing
+    assert "hybrid_retrieval;dur=" in server_timing
+    assert "generation;dur=" in server_timing
+    assert "completion;dur=" in server_timing
     assert retriever.query == "Why does Helen Haines support the bill?"
+
+
+def test_completion_maps_openai_connection_errors_to_service_unavailable() -> None:
+    """Return HTTP 503 when OpenAI cannot be reached."""
+
+    class UnavailableCompletionService(RagCompletionService):
+        """Raise the provider failure surfaced by the OpenAI SDK."""
+
+        def complete(self, question: str, *, limit: int = 10) -> CompletionRun:
+            """Raise a connection error without making a network request."""
+            raise APIConnectionError(
+                request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+            )
+
+    completion_service = UnavailableCompletionService(
+        retriever=StubRetriever(),
+        embedding_service=StubEmbeddingService(),
+        synthesizer=AnswerSynthesizer(OllamaAnswerGenerator(client=StubOllamaClient())),
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    app.dependency_overrides[get_completion_service] = lambda: completion_service
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/completion",
+            json={"question": "Why does Helen Haines support the bill?"},
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "The answer generation provider is unavailable."}

@@ -41,6 +41,7 @@ dependencies = [
     "graphrag-sdk[all]>=1.2.0",
     "ollama>=0.6.2",
     "python-dotenv>=1.2.4",
+    "openai>=2.54.0",
 ]
 
 [dependency-groups]

@@ -17,7 +17,11 @@ from ddd_policy_tracer.answering.ollama_generator import (
     OllamaAnswerGenerator,
     OllamaAnswerGeneratorConfig,
 )
-from ddd_policy_tracer.answering.service_layer import AnswerSynthesizer
+from ddd_policy_tracer.answering.openai_generator import (
+    OpenAIAnswerGenerator,
+    OpenAIAnswerGeneratorConfig,
+)
+from ddd_policy_tracer.answering.service_layer import AnswerGenerator, AnswerSynthesizer
 from ddd_policy_tracer.api.completion import router as completion_router
 from ddd_policy_tracer.enrichment.embedding import EmbeddingService
 from ddd_policy_tracer.paths import DATA_DIR
@@ -34,6 +38,25 @@ def load_app_environment(env_file: Path = ENV_FILE) -> None:
     load_dotenv(dotenv_path=env_file, override=False)
 
 
+def create_answer_generator() -> AnswerGenerator:
+    """Build the configured local or hosted answer-generation adapter."""
+    provider = os.environ.get("RAG_ANSWER_GENERATOR", "ollama").strip().lower()
+    if provider == "ollama":
+        return OllamaAnswerGenerator(
+            OllamaAnswerGeneratorConfig(
+                model=os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
+                host=os.environ.get("OLLAMA_HOST"),
+            ),
+        )
+    if provider == "openai":
+        return OpenAIAnswerGenerator(
+            OpenAIAnswerGeneratorConfig(
+                model=os.environ.get("OPENAI_MODEL", "gpt-6-luna"),
+            ),
+        )
+    raise ValueError("RAG_ANSWER_GENERATOR must be either 'ollama' or 'openai'")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object], None]:
     """Load shared retrieval and generation resources for the application lifetime."""
@@ -44,14 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object], None]:
     completion_service = RagCompletionService(
         retriever=retriever,
         embedding_service=embed_service,
-        synthesizer=AnswerSynthesizer(
-            OllamaAnswerGenerator(
-                OllamaAnswerGeneratorConfig(
-                    model=os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
-                    host=os.environ.get("OLLAMA_HOST"),
-                ),
-            ),
-        ),
+        synthesizer=AnswerSynthesizer(create_answer_generator()),
     )
     try:
         yield {
