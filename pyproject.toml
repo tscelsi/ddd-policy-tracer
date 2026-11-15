@@ -40,6 +40,7 @@ dependencies = [
     "pdf-inspector>=0.1.1",
     "graphrag-sdk[all]>=1.2.0",
     "ollama>=0.6.2",
+    "python-dotenv>=1.2.4",
 ]
 
 [dependency-groups]

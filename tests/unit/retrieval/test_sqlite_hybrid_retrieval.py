@@ -3,13 +3,37 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32
+from torch import Tensor
 
+from ddd_policy_tracer.retrieval.service_layer import retrieve_evidence_chunks
 from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
+
+
+class StubEmbeddingService:
+    """Return a fixed query vector while recording the embedded query."""
+
+    def __init__(self) -> None:
+        """Prepare query state for retrieval service tests."""
+        self.query: str | None = None
+        self.prompt_name: Literal["query", "document"] | None = None
+
+    def embed_one(
+        self,
+        text: str,
+        prompt_name: Literal["query", "document"] = "document",
+        return_tensor: bool = False,
+    ) -> list[float] | Tensor:
+        """Record the question and return the vector matching the test corpus."""
+        self.query = text
+        self.prompt_name = prompt_name
+        return [0.0, 1.0, 0.0]
 
 
 def _create_database(path: Path) -> None:
@@ -147,6 +171,30 @@ def test_hybrid_search_fuses_vector_and_bm25_rankings(tmp_path: Path) -> None:
     assert by_id["chunk-lexical"].bm25_score is not None
 
 
+def test_hybrid_search_supports_a_worker_thread(tmp_path: Path) -> None:
+    """Search with the startup-created FTS index from an API worker thread."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(
+                    retriever.search_hybrid,
+                    query="renewable energy",
+                    query_embedding=[0.0, 1.0, 0.0],
+                    limit=2,
+                )
+                for _ in range(4)
+            ]
+            results = [future.result() for future in futures]
+
+    assert all(
+        {result.chunk_id for result in search_results} == {"chunk-vector", "chunk-lexical"}
+        for search_results in results
+    )
+
+
 def test_bm25_search_returns_no_results_for_nonmatching_query(tmp_path: Path) -> None:
     """Return no candidates when the query has no indexed terms."""
     database_path = tmp_path / "retrieval.db"
@@ -164,3 +212,42 @@ def test_search_rejects_nonpositive_limit(tmp_path: Path) -> None:
     with SQLiteHybridRetriever(database_path) as retriever:
         with pytest.raises(ValueError, match="limit"):
             retriever.search_bm25(query="energy", limit=0)
+
+
+def test_retrieve_evidence_chunks_returns_ranked_ids_and_text(tmp_path: Path) -> None:
+    """Embed a question and return hybrid-ranked chunk IDs with their text."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+    embedding_service = StubEmbeddingService()
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        results = retrieve_evidence_chunks(
+            query="renewable energy",
+            retriever=retriever,
+            embedding_service=embedding_service,
+            limit=2,
+        )
+
+    assert results == {
+        "chunk-vector": "Climate policy and renewable energy.",
+        "chunk-lexical": "Renewable energy supports regional jobs.",
+    }
+    assert embedding_service.query == "renewable energy"
+    assert embedding_service.prompt_name == "query"
+
+
+def test_retrieve_evidence_chunks_rejects_empty_query(tmp_path: Path) -> None:
+    """Reject an empty question before calling the embedding service."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+    embedding_service = StubEmbeddingService()
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        with pytest.raises(ValueError, match="query"):
+            retrieve_evidence_chunks(
+                query="  ",
+                retriever=retriever,
+                embedding_service=embedding_service,
+            )
+
+    assert embedding_service.query is None

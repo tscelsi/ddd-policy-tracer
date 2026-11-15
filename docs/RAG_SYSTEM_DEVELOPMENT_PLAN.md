@@ -169,11 +169,21 @@ disable or bypass it.
 ### Phase 4 — Generate grounded answers and citations
 
 Add a thin answer-generation use case after retrieval quality is measurable.
-Pass selected evidence with provenance to the model, require claims to be
-supported by cited passages, and render citations from stored metadata rather
-than model-generated identifiers. For synthesis questions, retrieve and retain
-multiple distinct passages rather than repeatedly selecting near-duplicate
-chunks from one speech.
+Pass selected evidence with provenance to the model and have it return
+structured claims, each linked to one or more retrieved chunk IDs, or an
+explicit abstention. Validate every cited ID against the supplied evidence,
+then render inline citation numbers and the source list from stored metadata
+rather than model-generated identifiers. Retain the exact source passage with
+each citation so callers can display or verify it. For synthesis questions,
+retrieve and retain multiple distinct passages rather than repeatedly
+selecting near-duplicate chunks from one speech.
+
+The first generation adapter is `OllamaAnswerGenerator`, which uses the
+Ollama Python client and requests schema-constrained JSON. Its model and local
+Ollama host are configurable; the default model is `llama3.1:8b`. The Ollama
+server must be running with the selected model available. The generator is
+injected into `AnswerSynthesizer`, keeping citation validation and rendering
+independent of the model provider.
 
 Support explicit abstention when the retrieved evidence is missing, weak, or
 conflicting. Test citations against actual chunk text and source metadata, not

@@ -7,6 +7,7 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from threading import Lock
 
 import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32
@@ -42,7 +43,8 @@ class SQLiteHybridRetriever:
         if not resolved_path.is_file():
             raise FileNotFoundError(f"SQLite retrieval database is not a file: {resolved_path}")
         self._database_uri = f"{resolved_path.as_uri()}?mode=ro"
-        self._fts_connection = sqlite3.connect(":memory:")
+        self._fts_lock = Lock()
+        self._fts_connection = sqlite3.connect(":memory:", check_same_thread=False)
         self._create_fts_index()
 
     def __enter__(self) -> SQLiteHybridRetriever:
@@ -55,7 +57,8 @@ class SQLiteHybridRetriever:
 
     def close(self) -> None:
         """Close the in-memory lexical index after retrieval is complete."""
-        self._fts_connection.close()
+        with self._fts_lock:
+            self._fts_connection.close()
 
     def search_vector(
         self,
@@ -106,25 +109,26 @@ class SQLiteHybridRetriever:
         if not fts_query:
             return []
 
-        rows = self._fts_connection.execute(
-            """
-            SELECT chunk_id,
-                   source_id,
-                   source_document_id,
-                   chunk_index,
-                   start_char,
-                   end_char,
-                   chunk_text,
-                   topics,
-                   metadata,
-                   bm25(chunks_fts, 0, 0, 0, 0, 0, 0, 0, 0, 1.0) AS score
-            FROM chunks_fts
-            WHERE chunks_fts MATCH ?
-            ORDER BY score ASC
-            LIMIT ?
-            """,
-            (fts_query, limit),
-        ).fetchall()
+        with self._fts_lock:
+            rows = self._fts_connection.execute(
+                """
+                SELECT chunk_id,
+                       source_id,
+                       source_document_id,
+                       chunk_index,
+                       start_char,
+                       end_char,
+                       chunk_text,
+                       topics,
+                       metadata,
+                       bm25(chunks_fts, 0, 0, 0, 0, 0, 0, 0, 0, 1.0) AS score
+                FROM chunks_fts
+                WHERE chunks_fts MATCH ?
+                ORDER BY score ASC
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            ).fetchall()
         return [_chunk_result(row, bm25_score=float(row[9])) for row in rows]
 
     def search_hybrid(

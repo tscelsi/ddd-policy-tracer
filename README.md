@@ -18,3 +18,26 @@ DDD-first policy document acquisition prototype.
 ## Running the project
 
 - CLI entrypoint: `uv run python main.py`
+- API: `uv run uvicorn ddd_policy_tracer.app:app --port 5000`
+
+### Question completion API
+
+The `POST /api/completion` endpoint runs hybrid retrieval and answer
+synthesis. It returns the answer, inline citation text, cited source passages,
+and an explicit abstention state when the evidence is insufficient.
+
+```json
+{
+  "question": "Why does Helen Haines support the Three Day Guarantee Bill?",
+  "limit": 10
+}
+```
+
+The app loads `.env` from the repository root during startup. Set
+`RAG_DATABASE_PATH` there to the SQLite database containing `document_chunks`
+and `chunk_embeddings` (defaults to `data/new3.db`). Configure the local
+Ollama instance with `OLLAMA_HOST` if it is not using the client default, and
+select the answer model with `OLLAMA_MODEL` (defaults to `llama3.1:8b`).
+Existing process environment variables take precedence over `.env`. The
+Ollama server and selected model must be available when a completion request
+is made.
