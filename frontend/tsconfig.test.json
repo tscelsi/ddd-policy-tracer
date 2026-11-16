@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "outDir": ".test-build",
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": [
+    "tests/**/*.ts",
+    "lib/completion.ts",
+    "app/api/completion/route.ts"
+  ],
+  "exclude": ["node_modules", ".next", ".test-build"]
+}
