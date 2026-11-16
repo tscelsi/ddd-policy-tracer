@@ -7,6 +7,8 @@ from typing import Literal, Protocol
 
 from torch import Tensor
 
+from ddd_policy_tracer.retrieval.metadata_filters import MetadataFilter
+
 
 class RetrievedChunk(Protocol):
     """Expose the evidence fields used to answer a retrieval query."""
@@ -55,6 +57,7 @@ class HybridChunkRetriever(Protocol):
         query_embedding: Sequence[float],
         limit: int = 10,
         candidate_limit: int | None = None,
+        filters: MetadataFilter | None = None,
     ) -> Sequence[RetrievedChunk]:
         """Return ranked evidence chunks for a lexical and semantic query."""
         ...
@@ -67,6 +70,7 @@ def retrieve_evidence_chunks(
     embedding_service: QueryEmbedder,
     limit: int = 10,
     candidate_limit: int | None = None,
+    filters: MetadataFilter | None = None,
 ) -> dict[str, str]:
     """Return ranked evidence chunk IDs mapped to their speech text."""
     results = retrieve_ranked_evidence(
@@ -75,6 +79,7 @@ def retrieve_evidence_chunks(
         embedding_service=embedding_service,
         limit=limit,
         candidate_limit=candidate_limit,
+        filters=filters,
     )
     return {result.chunk_id: result.chunk_text for result in results}
 
@@ -86,6 +91,7 @@ def retrieve_ranked_evidence(
     embedding_service: QueryEmbedder,
     limit: int = 10,
     candidate_limit: int | None = None,
+    filters: MetadataFilter | None = None,
 ) -> Sequence[RetrievedChunk]:
     """Return ranked evidence chunks with citation provenance intact."""
     if not query.strip():
@@ -101,6 +107,7 @@ def retrieve_ranked_evidence(
         query_embedding=query_embedding,
         limit=limit,
         candidate_limit=candidate_limit,
+        filters=filters,
     )
 
 

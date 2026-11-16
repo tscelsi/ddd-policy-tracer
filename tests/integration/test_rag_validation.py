@@ -16,7 +16,7 @@ from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VALIDATION_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "rag_validation_cases.json"
-DATABASE_PATH = REPOSITORY_ROOT / "data" / "new3.db"
+DATABASE_PATH = REPOSITORY_ROOT / "data" / "new4.db"
 
 with VALIDATION_FIXTURE.open(encoding="utf-8") as fixture_file:
     _VALIDATION_CASES: list[dict[str, Any]] = json.load(fixture_file)["cases"]

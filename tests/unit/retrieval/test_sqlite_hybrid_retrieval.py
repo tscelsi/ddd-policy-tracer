@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +13,7 @@ import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32
 from torch import Tensor
 
+from ddd_policy_tracer.retrieval.metadata_filters import MetadataFilter
 from ddd_policy_tracer.retrieval.service_layer import retrieve_evidence_chunks
 from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 
@@ -50,7 +52,18 @@ def _create_database(path: Path) -> None:
             end_char INTEGER NOT NULL,
             chunk_text TEXT NOT NULL,
             topics TEXT,
-            metadata TEXT
+            metadata TEXT,
+            published_at TEXT,
+            speaker_name TEXT,
+            talker_id TEXT,
+            party TEXT,
+            electorate TEXT,
+            house TEXT,
+            chamber TEXT,
+            bill_ids TEXT,
+            debate_category TEXT,
+            debate_titles TEXT,
+            speech_part_type TEXT
         )
         """,
     )
@@ -118,6 +131,42 @@ def _create_database(path: Path) -> None:
         "INSERT INTO chunk_embeddings (chunk_id, embedding) VALUES (?, ?)",
         [(chunk[0], serialize_float32(chunk[9])) for chunk in chunks],
     )
+    connection.execute(
+        """
+        UPDATE document_chunks
+        SET published_at = '2024-06-01',
+            speaker_name = 'Member A',
+            talker_id = 'talker-1',
+            party = 'Example Party',
+            electorate = 'Example Electorate',
+            house = 'senate',
+            chamber = 'main',
+            bill_ids = '["bill-1"]',
+            debate_category = 'Bills',
+            debate_titles = '["Second reading"]',
+            speech_part_type = 'speech'
+        WHERE chunk_id = 'chunk-vector'
+        """,
+    )
+    connection.execute(
+        """
+        UPDATE document_chunks
+        SET published_at = '2024-06-02',
+            speaker_name = 'Member B',
+            talker_id = 'talker-2',
+            house = 'senate'
+        WHERE chunk_id = 'chunk-lexical'
+        """,
+    )
+    connection.execute(
+        """
+        UPDATE document_chunks
+        SET source_id = 'other',
+            published_at = '2024-06-01',
+            talker_id = 'talker-1'
+        WHERE chunk_id = 'chunk-unrelated'
+        """,
+    )
     connection.commit()
     connection.close()
 
@@ -129,13 +178,27 @@ def test_vector_search_returns_nearest_chunk_and_provenance(tmp_path: Path) -> N
 
     with SQLiteHybridRetriever(database_path) as retriever:
         results = retriever.search_vector(query_embedding=[0.0, 1.0, 0.0], limit=2)
+        lexical_results = retriever.search_bm25(query="climate", limit=1)
 
     assert results[0].chunk_id == "chunk-vector"
     assert results[0].vector_distance == 0.0
     assert results[0].source_document_id == "speech-1"
     assert results[0].topics == '["Environment"]'
     assert results[0].metadata == '{"speaker":"Member A"}'
+    assert results[0].published_at == "2024-06-01"
+    assert results[0].speaker_name == "Member A"
+    assert results[0].talker_id == "talker-1"
+    assert results[0].party == "Example Party"
+    assert results[0].electorate == "Example Electorate"
+    assert results[0].house == "senate"
+    assert results[0].chamber == "main"
+    assert results[0].bill_ids == ["bill-1"]
+    assert results[0].debate_category == "Bills"
+    assert results[0].debate_titles == ["Second reading"]
+    assert results[0].speech_part_type == "speech"
     assert results[0].bm25_score is None
+    assert lexical_results[0].chunk_id == "chunk-vector"
+    assert lexical_results[0].talker_id == "talker-1"
 
 
 def test_bm25_search_ranks_matching_chunk_and_quotes_query_terms(tmp_path: Path) -> None:
@@ -169,6 +232,64 @@ def test_hybrid_search_fuses_vector_and_bm25_rankings(tmp_path: Path) -> None:
     assert all(result.fused_score is not None for result in results)
     assert by_id["chunk-vector"].vector_distance == 0.0
     assert by_id["chunk-lexical"].bm25_score is not None
+
+
+def test_hybrid_search_applies_filters_before_candidate_limits(tmp_path: Path) -> None:
+    """Keep matching chunks eligible for both ranks before each candidate top-k."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        results = retriever.search_hybrid(
+            query="renewable energy",
+            query_embedding=[1.0, 0.0, 0.0],
+            limit=3,
+            candidate_limit=1,
+            filters=MetadataFilter(
+                talker_ids=("talker-1",),
+                date_from=date(2024, 6, 1),
+                date_to=date(2024, 6, 1),
+            ),
+        )
+
+    assert [result.chunk_id for result in results] == ["chunk-vector"]
+    assert results[0].talker_id == "talker-1"
+
+
+def test_hybrid_search_combines_speaker_or_and_date_and(tmp_path: Path) -> None:
+    """Match any requested speaker while requiring all selected filter fields."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        results = retriever.search_hybrid(
+            query="renewable energy",
+            query_embedding=[0.0, 1.0, 0.0],
+            limit=3,
+            filters=MetadataFilter(
+                talker_ids=("talker-1", "talker-2"),
+                date_from=date(2024, 6, 2),
+                date_to=date(2024, 6, 2),
+            ),
+        )
+
+    assert results
+    assert {result.chunk_id for result in results} == {"chunk-lexical"}
+
+
+def test_hybrid_search_does_not_fall_back_when_filters_match_nothing(tmp_path: Path) -> None:
+    """Preserve empty results instead of retrying an unfiltered query."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        results = retriever.search_hybrid(
+            query="renewable energy",
+            query_embedding=[0.0, 1.0, 0.0],
+            filters=MetadataFilter(talker_ids=("missing-talker",)),
+        )
+
+    assert results == []
 
 
 def test_hybrid_search_supports_a_worker_thread(tmp_path: Path) -> None:

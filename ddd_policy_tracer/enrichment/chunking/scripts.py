@@ -13,6 +13,7 @@ async def visualise_chunk_sample(source_id: str | None = None) -> None:
     from ddd_policy_tracer.enrichment.chunking.adapters import SQLiteDocumentChunkRepository
 
     repository = SQLiteDocumentChunkRepository(db_manager=DbManager.get_instance())
+    await repository.init()
     chunks = await repository.list_chunks(source_id=source_id)
     for chunk in chunks:
         logging.info("\n".join(textwrap.wrap(chunk.chunk_text, TEXT_WIDTH, break_long_words=False)))

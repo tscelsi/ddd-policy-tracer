@@ -12,6 +12,10 @@ sequenceDiagram
     actor Caller
     participant API as FastAPI completion router
     participant Completion as RagCompletionService
+    participant Filter as MetadataFilterExtractor
+    participant FilterModel as Ollama or OpenAI
+    participant Talkers as MongoTalkerNameResolver
+    participant Mongo as Hansard talker repository
     participant Embed as EmbeddingService
     participant Retriever as SQLiteHybridRetriever
     participant Vec as sqlite-vec
@@ -23,14 +27,28 @@ sequenceDiagram
     Caller->>API: POST /api/completion {question, limit}
     API->>API: Validate request and resolve app-lifetime service
     API->>Completion: complete(question, limit)
+    Completion->>Filter: extract(question, current Canberra date)
+    Filter->>FilterModel: structured metadata-filter request
+    FilterModel-->>Filter: dates, speaker names, unsupported constraints
+    Filter-->>Completion: MetadataFilterExtraction
+    opt speaker names requested
+        Completion->>Talkers: resolve(speaker names)
+        Talkers->>Mongo: load talker catalog on first lookup
+        Mongo-->>Talkers: canonical names and stable IDs
+        Talkers-->>Completion: IDs or clarification
+    end
+    alt unclear, unsupported, or ambiguous filter
+        Completion-->>API: clarification_required and question
+        API-->>Caller: clarification response (no retrieval or generation)
+    else constraints resolved
     Completion->>Embed: embed_one(question, prompt_name="query")
     Embed-->>Completion: query embedding
-    Completion->>Retriever: search_hybrid(question, embedding, limit)
+    Completion->>Retriever: search_hybrid(question, embedding, limit, filters)
     par Semantic retrieval
-        Retriever->>Vec: nearest-neighbor search
+        Retriever->>Vec: filtered nearest-neighbor candidates
         Vec-->>Retriever: vector-ranked chunks
     and Lexical retrieval
-        Retriever->>FTS: BM25 text search
+        Retriever->>FTS: filtered BM25 candidates
         FTS-->>Retriever: lexical-ranked chunks
     end
     Retriever->>Retriever: reciprocal-rank fusion
@@ -45,6 +63,7 @@ sequenceDiagram
     Completion-->>API: answer, timings, evidence count
     API->>API: map to JSON and add Server-Timing header
     API-->>Caller: answer, citations, abstention state
+    end
 ```
 
 ## Startup and dependency wiring
@@ -59,14 +78,17 @@ During FastAPI lifespan startup it:
    `SQLiteHybridRetriever`. Its in-memory FTS5 index is populated from
    `document_chunks` at construction; vector queries read from the same
    database.
-4. Selects an answer-generation adapter using `RAG_ANSWER_GENERATOR`, then
-   constructs `AnswerSynthesizer` and `RagCompletionService`.
+4. Selects matching metadata-extraction and answer-generation adapters using
+   `RAG_ANSWER_GENERATOR`, and constructs the `MongoTalkerNameResolver`. The
+   Mongo talker catalog itself is loaded lazily, only when speaker filtering is
+   requested.
 5. Publishes the completion use case on FastAPI application lifespan state.
-   The retriever is closed during shutdown.
+   The retriever and Mongo client are closed during shutdown.
 
 The generator setting accepts `ollama` or `openai`; `ollama` is the current
-default. See [README.md](../README.md#question-completion-api) for environment
-configuration.
+default. Set `MONGODB_URI` and `HANSARD_MONGO_DATABASE` for speaker resolution;
+their defaults are `mongodb://localhost:27017` and `hansard`. See
+[README.md](../README.md#question-completion-api) for environment configuration.
 
 ## Module responsibilities
 
@@ -74,9 +96,12 @@ configuration.
 |---|---|
 | [`app.py`](../ddd_policy_tracer/app.py) | Composition root: load environment, create shared resources, choose generator, register routers, and close the retriever. |
 | [`api/completion.py`](../ddd_policy_tracer/api/completion.py) | HTTP adapter: validate request fields, resolve the use case, map expected provider/input failures, serialize the response, and report timings. |
-| [`answering/completion_service.py`](../ddd_policy_tracer/answering/completion_service.py) | Use-case orchestration: time query embedding, hybrid retrieval, and answer synthesis separately. |
+| [`answering/completion_service.py`](../ddd_policy_tracer/answering/completion_service.py) | Use-case orchestration: extract and resolve filters before query embedding, then time retrieval and synthesis. |
+| [`answering/metadata_filter_extractor.py`](../ddd_policy_tracer/answering/metadata_filter_extractor.py) | Ollama and OpenAI structured-output adapters for filter extraction. |
+| [`retrieval/metadata_filters.py`](../ddd_policy_tracer/retrieval/metadata_filters.py) | Typed date/speaker filter contract, extraction output validation, and Canberra-to-UTC range conversion. |
+| [`retrieval/speaker_resolution.py`](../ddd_policy_tracer/retrieval/speaker_resolution.py) | Lazily cache the Hansard talker catalog and resolve unambiguous names to stable IDs. |
 | [`retrieval/service_layer.py`](../ddd_policy_tracer/retrieval/service_layer.py) | Validate and embed the question, then return ranked evidence records with citation provenance intact. |
-| [`retrieval/sqlite_retrieval.py`](../ddd_policy_tracer/retrieval/sqlite_retrieval.py) | Adapter for sqlite-vec and FTS5 search; fuses their rankings with reciprocal-rank fusion. |
+| [`retrieval/sqlite_retrieval.py`](../ddd_policy_tracer/retrieval/sqlite_retrieval.py) | Apply speaker/date constraints before sqlite-vec and FTS5 candidate limits, then fuse rankings. |
 | [`answering/service_layer.py`](../ddd_policy_tracer/answering/service_layer.py) | Generator port and answer domain types; `AnswerSynthesizer` validates chunk references, handles abstention, and renders citations from evidence. |
 | [`answering/ollama_generator.py`](../ddd_policy_tracer/answering/ollama_generator.py) | Local Ollama adapter for structured claims and abstention. |
 | [`answering/openai_generator.py`](../ddd_policy_tracer/answering/openai_generator.py) | OpenAI adapter for the same structured answer-generation contract. |
@@ -103,6 +128,21 @@ The hybrid retriever searches vector and lexical candidates separately. Its
 candidate limit defaults to `max(30, limit * 3)`, then reciprocal-rank fusion
 produces the requested final `limit`.
 
+Every completion runs one structured filter-extraction request through the
+configured Ollama or OpenAI provider. V1 supports speaker and date/date-range
+filters. Multiple speakers are ORed; date and speaker dimensions are ANDed.
+Dates use inclusive Australia/Canberra calendar days, converted to UTC bounds
+for storage comparisons. Relative periods are resolved against the current
+Canberra date. The original question remains unchanged for embedding, lexical
+retrieval, and answer generation.
+
+Speaker names are matched against canonical, first-and-last, or unique
+last-name forms. An unknown or ambiguous speaker, an explicitly requested
+unsupported metadata constraint, or unclear filter intent returns a
+clarification response before embedding or retrieval. Empty filtered results
+remain empty and follow the normal answer abstention path; retrieval never
+retries without the requested constraints.
+
 ### Generated draft and citations
 
 Each generator returns an `AnswerDraft` containing either:
@@ -126,26 +166,32 @@ retrieved; semantic support still requires answer evaluation.
 
 `CompletionResponse` contains:
 
-- `answer`: rendered text with inline `[n]` references and a source list.
+- `answer`: rendered text with inline `[n]` references and a source list, or
+  `null` when clarification is required.
 - `citations`: numbered chunk IDs, source IDs, passages, and available
   speaker/date/house/chamber provenance.
 - `abstained` and `abstention_reason`.
+- `clarification_required` and `clarification_question` when metadata intent
+  cannot safely be applied.
 
-Expected input errors return HTTP 400. Provider connection/API failures return
-HTTP 503. Unexpected failures (for example database or index errors) are not
-silently converted into successful answers.
+Expected input errors return HTTP 400. Invalid structured filter output returns
+HTTP 502; provider or Mongo connection/API failures return HTTP 503. Unexpected
+failures (for example database or index errors) are not silently converted
+into successful answers.
 
 ## Timing and observation
 
 The completion use case records:
 
+- `metadata_filter_ms`: structured extraction and any speaker-name resolution.
 - `embedding_ms`: query embedding.
 - `hybrid_retrieval_ms`: vector search, BM25, and rank fusion.
 - `generation_ms`: generator call plus answer validation and citation
   synthesis.
 
-Successful responses expose these values and total completion-handler time in
-the `Server-Timing` header. The application log records the same stage
-durations, retrieved evidence count, and abstention status without logging the
-question or passages. See [Profiling completion requests](../README.md#profiling-completion-requests)
-for a `curl` example.
+Responses expose these values and total completion-handler time in the
+`Server-Timing` header. The application log records the same stage durations,
+retrieved evidence count, abstention status, and clarification status without
+logging the question or passages. See
+[Profiling completion requests](../README.md#profiling-completion-requests) for
+a `curl` example.

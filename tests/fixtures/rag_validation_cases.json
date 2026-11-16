@@ -1,7 +1,7 @@
 {
   "version": 1,
   "status": "draft_for_human_review",
-  "source_database": "data/new3.db",
+  "source_database": "data/new4.db",
   "corpus_coverage": "The inspected database contains Hansard chunks dated in 2025 only.",
   "annotation_notes": [
     "Gold chunk IDs are candidate supporting evidence, not an adjudicated exhaustive relevance set.",

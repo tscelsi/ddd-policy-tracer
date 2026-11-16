@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Protocol
+from typing import Any, Protocol, TypedDict
 
 import spacy
 import spacy.tokens
@@ -33,6 +33,23 @@ class _SentenceSpan:
 
     start_char: int
     end_char: int
+
+
+class _ChunkProvenance(TypedDict):
+    """Type the source fields copied onto each document chunk."""
+
+    metadata: dict[str, Any] | None
+    published_at: str | None
+    speaker_name: str | None
+    talker_id: str | None
+    party: str | None
+    electorate: str | None
+    house: str | None
+    chamber: str | None
+    bill_ids: list[str] | None
+    debate_category: str | None
+    debate_titles: list[str] | None
+    speech_part_type: str | None
 
 
 def get_chunker(source_id: str) -> Chunker:
@@ -119,6 +136,7 @@ class SpacyChunker(Chunker):
                     start_char=start_char,
                     end_char=end_char,
                     chunk_text=chunk_text,
+                    **_chunk_provenance(doc),
                 ),
             )
             index += 1
@@ -198,7 +216,7 @@ class MarkdownChunker(Chunker):
                                 start_char=start_char,
                                 end_char=end_char,
                                 chunk_text=curr_span.text.strip(),
-                                metadata={"doc_metadata": doc.metadata} if doc.metadata else None,
+                                **_chunk_provenance(doc),
                             ),
                         )
                         start_char = end_char + 1
@@ -229,7 +247,7 @@ class MarkdownChunker(Chunker):
                             start_char=start_char,
                             end_char=end_char,
                             chunk_text=curr_span.text.strip(),
-                            metadata={"doc_metadata": doc.metadata} if doc.metadata else None,
+                            **_chunk_provenance(doc),
                         ),
                     )
                 start_char = end_char + 1
@@ -254,7 +272,7 @@ class MarkdownChunker(Chunker):
                         start_char=start_char,
                         end_char=end_char,
                         chunk_text=chunk.page_content.strip(),
-                        metadata={"doc_metadata": doc.metadata} if doc.metadata else None,
+                        **_chunk_provenance(doc),
                     ),
                 )
                 start_char = end_char + 1
@@ -314,6 +332,7 @@ class SemanticChunker(Chunker):
                 start_char=sents[i].start_char,
                 end_char=sents[end_i].end_char,
                 chunk_text=spacy_doc.text[sents[i].start_char : sents[end_i].end_char].strip(),
+                **_chunk_provenance(doc),
             )
             chunks.append(doc_chunk)
         i = 0
@@ -346,6 +365,18 @@ class SemanticChunker(Chunker):
                     start_char=curr_chunk.start_char,
                     end_char=chunks[i + 1].end_char,
                     chunk_text=curr_chunk.chunk_text + " " + chunks[i + 1].chunk_text,
+                    metadata=curr_chunk.metadata,
+                    published_at=curr_chunk.published_at,
+                    speaker_name=curr_chunk.speaker_name,
+                    talker_id=curr_chunk.talker_id,
+                    party=curr_chunk.party,
+                    electorate=curr_chunk.electorate,
+                    house=curr_chunk.house,
+                    chamber=curr_chunk.chamber,
+                    bill_ids=curr_chunk.bill_ids,
+                    debate_category=curr_chunk.debate_category,
+                    debate_titles=curr_chunk.debate_titles,
+                    speech_part_type=curr_chunk.speech_part_type,
                 )
             else:
                 merged_chunks.append(curr_chunk)
@@ -375,6 +406,41 @@ def _segment_sentences(normalized_text: str) -> list[_SentenceSpan]:
     if sentences:
         return sentences
     return [_SentenceSpan(start_char=0, end_char=len(normalized_text))]
+
+
+def _chunk_provenance(doc: SourceDocument) -> _ChunkProvenance:
+    """Map source provenance into explicit chunk fields while retaining source metadata."""
+    metadata = doc.metadata or {}
+    talker = metadata.get("talker")
+    talker_data = talker if isinstance(talker, dict) else {}
+    bill_ids = metadata.get("bill_ids")
+    debate_titles = metadata.get("debate_titles")
+    return {
+        "metadata": {"doc_metadata": doc.metadata} if doc.metadata else None,
+        "published_at": doc.published_at,
+        "speaker_name": _optional_string(talker_data.get("name")),
+        "talker_id": _optional_string(metadata.get("talker_id", talker_data.get("id"))),
+        "party": _optional_string(talker_data.get("party")),
+        "electorate": _optional_string(talker_data.get("electorate")),
+        "house": _optional_string(metadata.get("house")),
+        "chamber": _optional_string(metadata.get("chamber")),
+        "bill_ids": _string_list(bill_ids),
+        "debate_category": _optional_string(metadata.get("debate_category")),
+        "debate_titles": _string_list(debate_titles),
+        "speech_part_type": _optional_string(metadata.get("speech_part_type")),
+    }
+
+
+def _optional_string(value: object) -> str | None:
+    """Return a metadata value only when it is a string."""
+    return value if isinstance(value, str) else None
+
+
+def _string_list(value: object) -> list[str] | None:
+    """Return a copied list containing only string metadata values."""
+    if not isinstance(value, list):
+        return None
+    return [item for item in value if isinstance(item, str)]
 
 
 def _select_chunk_end_sentence(

@@ -24,7 +24,10 @@ DDD-first policy document acquisition prototype.
 
 The `POST /api/completion` endpoint runs hybrid retrieval and answer
 synthesis. It returns the answer, inline citation text, cited source passages,
-and an explicit abstention state when the evidence is insufficient.
+and an explicit abstention state when the evidence is insufficient. A
+structured metadata-filter step can narrow retrieval by speaker and date; when
+requested constraints cannot be safely resolved, the response asks for
+clarification instead of searching without them.
 See [RAG completion request flow](docs/RAG_COMPLETION_FLOW.md) for the
 sequence diagram and module responsibilities.
 
@@ -44,6 +47,14 @@ Existing process environment variables take precedence over `.env`. The
 Ollama server and selected model must be available when a completion request
 is made.
 
+Set `MONGODB_URI` and `HANSARD_MONGO_DATABASE` for speaker-name resolution
+(defaults to `mongodb://localhost:27017` and `hansard`). The Mongo talker
+catalog is loaded only when a question requests a speaker filter. Date filters
+use inclusive Australia/Canberra calendar dates; relative periods are resolved
+against the current Canberra date. Party, house, chamber, bill, and debate
+filters are not yet supported and trigger a clarification response when
+explicitly requested.
+
 Set `RAG_ANSWER_GENERATOR=openai` to use the OpenAI adapter instead. Provide
 `OPENAI_API_KEY` and optionally `OPENAI_MODEL` (defaults to `gpt-4.1-mini`)
 in `.env` or the process environment. Ollama remains the default provider.
@@ -54,9 +65,10 @@ key to the repository.
 
 Each successful `POST /api/completion` response includes a `Server-Timing`
 header with durations for `embedding`, `hybrid_retrieval`, `generation`, and
-the total `completion` handler time. The application log also emits these
-durations with the number of retrieved evidence chunks and whether the answer
-abstained; it does not log the question or speech passages.
+`metadata_filter`, plus the total `completion` handler time. The application
+log also emits these durations with the number of retrieved evidence chunks
+and whether the answer abstained or needs clarification; it does not log the
+question or speech passages.
 
 Inspect the header with:
 

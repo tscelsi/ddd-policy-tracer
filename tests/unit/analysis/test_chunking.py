@@ -1,9 +1,11 @@
 """Unit tests for deterministic analysis chunking behavior."""
 
+from dataclasses import replace
+
 import pytest
 
 from ddd_policy_tracer.__DEPRECATED_analysis import ChunkingConfig
-from ddd_policy_tracer.enrichment.chunking.chunking import SpacyChunker
+from ddd_policy_tracer.enrichment.chunking.chunking import MarkdownChunker, SpacyChunker
 from ddd_policy_tracer.ingestion.domain import SourceDocument
 
 
@@ -128,3 +130,46 @@ def test_chunk_document_version_rejects_invalid_chunking_config(chunker: SpacyCh
     chunker.set_config(ChunkingConfig(chunk_size_chars=10, chunk_overlap_chars=10))
     with pytest.raises(ValueError, match="chunk_overlap_chars must be less than chunk_size_chars"):
         chunker.chunk_document(doc=version)
+
+
+def test_chunkers_surface_hansard_metadata_as_typed_fields() -> None:
+    """Keep Hansard search fields explicit while retaining source metadata."""
+    version = _sample_version(
+        text="A parliamentary speech.",
+    )
+    version = replace(
+        version,
+        source_id="hansard",
+        metadata={
+            "talker": {
+                "name": "Member A",
+                "party": "Example Party",
+                "electorate": "Example Electorate",
+            },
+            "talker_id": "talker-1",
+            "house": "senate",
+            "chamber": "main",
+            "bill_ids": ["bill-1"],
+            "debate_category": "Bills",
+            "debate_titles": ["Second reading"],
+            "speech_part_type": "speech",
+        },
+    )
+
+    chunks = MarkdownChunker().chunk_document(doc=version)
+
+    assert len(chunks) == 1
+    chunk = chunks[0]
+    assert chunk.published_at == version.published_at
+    assert chunk.speaker_name == "Member A"
+    assert chunk.talker_id == "talker-1"
+    assert chunk.party == "Example Party"
+    assert chunk.electorate == "Example Electorate"
+    assert chunk.house == "senate"
+    assert chunk.chamber == "main"
+    assert chunk.bill_ids == ["bill-1"]
+    assert chunk.debate_category == "Bills"
+    assert chunk.debate_titles == ["Second reading"]
+    assert chunk.speech_part_type == "speech"
+    assert chunk.metadata == {"doc_metadata": version.metadata}
+    assert chunk.update_embedding([0.1]).talker_id == "talker-1"

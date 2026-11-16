@@ -11,9 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from ollama import ResponseError
 from openai import APIError as OpenAIError
 from pydantic import BaseModel, ConfigDict, Field
+from pymongo.errors import PyMongoError
 
-from ddd_policy_tracer.answering.completion_service import RagCompletionService
+from ddd_policy_tracer.answering.completion_service import CompletionRun, RagCompletionService
 from ddd_policy_tracer.answering.service_layer import SynthesizedAnswer
+from ddd_policy_tracer.retrieval.metadata_filters import MetadataFilterExtractionError
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +43,30 @@ class CitationResponse(BaseModel):
 
 
 class CompletionResponse(BaseModel):
-    """Return a synthesized answer, citations, and abstention state."""
+    """Return an answer or clarification, citations, and abstention state."""
 
-    answer: str
+    answer: str | None
     citations: list[CitationResponse]
     abstained: bool
     abstention_reason: str | None
+    clarification_required: bool = False
+    clarification_question: str | None = None
 
     @classmethod
-    def from_answer(cls, answer: SynthesizedAnswer) -> CompletionResponse:
-        """Convert the answer-domain result into its HTTP response representation."""
+    def from_run(cls, run: CompletionRun) -> CompletionResponse:
+        """Convert an answer or clarification result into its HTTP representation."""
+        if run.answer is None:
+            if run.clarification_question is None:
+                raise ValueError("Completion run must contain an answer or clarification")
+            return cls(
+                answer=None,
+                citations=[],
+                abstained=False,
+                abstention_reason=None,
+                clarification_required=True,
+                clarification_question=run.clarification_question,
+            )
+        answer: SynthesizedAnswer = run.answer
         return cls(
             answer=answer.text,
             citations=[
@@ -68,6 +84,8 @@ class CompletionResponse(BaseModel):
             ],
             abstained=answer.abstained,
             abstention_reason=answer.abstention_reason,
+            clarification_required=False,
+            clarification_question=None,
         )
 
 
@@ -86,7 +104,7 @@ router = APIRouter(tags=["completion"])
 
 
 @router.post("/completion", response_model=CompletionResponse)
-def create_completion(
+async def create_completion(
     payload: CompletionRequest,
     completion_service: Annotated[RagCompletionService, Depends(get_completion_service)],
     response: Response,
@@ -94,24 +112,31 @@ def create_completion(
     """Retrieve speech evidence and return an answer with source-backed citations."""
     request_started = perf_counter()
     try:
-        run = completion_service.complete(payload.question, limit=payload.limit)
+        run = await completion_service.complete(payload.question, limit=payload.limit)
+    except MetadataFilterExtractionError as exc:
+        logger.exception("Metadata filter extraction returned an invalid response")
+        raise HTTPException(
+            status_code=502,
+            detail="The metadata filter provider returned an invalid response.",
+        ) from exc
     except ValueError as exc:
         logger.exception("Answer generation failed due to invalid input")
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
-    except (httpx.HTTPError, OpenAIError, ResponseError) as exc:
-        logger.exception("Answer generation provider is unavailable")
+    except (httpx.HTTPError, OpenAIError, ResponseError, PyMongoError) as exc:
+        logger.exception("A completion provider or data source is unavailable")
         raise HTTPException(
             status_code=503,
             detail="The answer generation provider is unavailable.",
         ) from exc
-    completion_response = CompletionResponse.from_answer(run.answer)
+    completion_response = CompletionResponse.from_run(run)
     total_ms = (perf_counter() - request_started) * 1000
     timings = run.timings
     response.headers["Server-Timing"] = ", ".join(
         (
+            f"metadata_filter;dur={timings.metadata_filter_ms:.3f}",
             f"embedding;dur={timings.embedding_ms:.3f}",
             f"hybrid_retrieval;dur={timings.hybrid_retrieval_ms:.3f}",
             f"generation;dur={timings.generation_ms:.3f}",
@@ -121,12 +146,14 @@ def create_completion(
     logger.info(
         "completion_timing",
         extra={
+            "metadata_filter_ms": timings.metadata_filter_ms,
             "embedding_ms": timings.embedding_ms,
             "hybrid_retrieval_ms": timings.hybrid_retrieval_ms,
             "generation_ms": timings.generation_ms,
             "completion_ms": total_ms,
             "evidence_count": run.evidence_count,
-            "abstained": run.answer.abstained,
+            "abstained": run.answer.abstained if run.answer is not None else False,
+            "clarification_required": run.clarification_required,
         },
     )
     return completion_response

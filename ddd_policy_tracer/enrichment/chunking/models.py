@@ -24,7 +24,7 @@ class Topic(TypedDict):
 
 @dataclass(frozen=True)
 class DocumentChunk:
-    """Represent one version-bound text chunk with traceable offsets."""
+    """Represent one version-bound text chunk with traceable offsets and provenance."""
 
     chunk_id: str
     source_id: str
@@ -37,6 +37,17 @@ class DocumentChunk:
     topics: list[Topic] | None = None
     embedding: list[float] | None = None
     metadata: dict[str, Any] | None = None
+    published_at: str | None = None
+    speaker_name: str | None = None
+    talker_id: str | None = None
+    party: str | None = None
+    electorate: str | None = None
+    house: str | None = None
+    chamber: str | None = None
+    bill_ids: list[str] | None = None
+    debate_category: str | None = None
+    debate_titles: list[str] | None = None
+    speech_part_type: str | None = None
 
     def update_embedding(self, embedding: list[float] | None) -> DocumentChunk:
         """Update the chunk with a new embedding vector."""
@@ -52,6 +63,17 @@ class DocumentChunk:
             topics=self.topics,
             embedding=embedding,
             metadata=self.metadata,
+            published_at=self.published_at,
+            speaker_name=self.speaker_name,
+            talker_id=self.talker_id,
+            party=self.party,
+            electorate=self.electorate,
+            house=self.house,
+            chamber=self.chamber,
+            bill_ids=self.bill_ids,
+            debate_category=self.debate_category,
+            debate_titles=self.debate_titles,
+            speech_part_type=self.speech_part_type,
         )
 
     def update_topics(self, topics: list[Topic]) -> DocumentChunk:
@@ -68,6 +90,17 @@ class DocumentChunk:
             topics=topics,
             embedding=self.embedding,
             metadata=self.metadata,
+            published_at=self.published_at,
+            speaker_name=self.speaker_name,
+            talker_id=self.talker_id,
+            party=self.party,
+            electorate=self.electorate,
+            house=self.house,
+            chamber=self.chamber,
+            bill_ids=self.bill_ids,
+            debate_category=self.debate_category,
+            debate_titles=self.debate_titles,
+            speech_part_type=self.speech_part_type,
         )
 
     def serialize(self) -> str:
@@ -85,6 +118,17 @@ class DocumentChunk:
                 "topics": self.topics,
                 "embedding": self.embedding,
                 "metadata": self.metadata,
+                "published_at": self.published_at,
+                "speaker_name": self.speaker_name,
+                "talker_id": self.talker_id,
+                "party": self.party,
+                "electorate": self.electorate,
+                "house": self.house,
+                "chamber": self.chamber,
+                "bill_ids": self.bill_ids,
+                "debate_category": self.debate_category,
+                "debate_titles": self.debate_titles,
+                "speech_part_type": self.speech_part_type,
             },
             default=str,
         )

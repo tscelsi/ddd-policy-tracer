@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Sequence
@@ -11,6 +12,11 @@ from threading import Lock
 
 import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32
+
+from ddd_policy_tracer.retrieval.metadata_filters import (
+    MetadataFilter,
+    utc_published_at_bounds,
+)
 
 _RRF_K = 60
 _FTS_TOKEN = re.compile(r"\w+", flags=re.UNICODE)
@@ -32,6 +38,17 @@ class SQLiteChunkResult:
     vector_distance: float | None = None
     bm25_score: float | None = None
     fused_score: float | None = None
+    published_at: str | None = None
+    speaker_name: str | None = None
+    talker_id: str | None = None
+    party: str | None = None
+    electorate: str | None = None
+    house: str | None = None
+    chamber: str | None = None
+    bill_ids: list[str] | None = None
+    debate_category: str | None = None
+    debate_titles: list[str] | None = None
+    speech_part_type: str | None = None
 
 
 class SQLiteHybridRetriever:
@@ -65,12 +82,14 @@ class SQLiteHybridRetriever:
         *,
         query_embedding: Sequence[float],
         limit: int = 10,
+        filters: MetadataFilter | None = None,
     ) -> list[SQLiteChunkResult]:
-        """Return nearest chunks using the database's sqlite-vec index."""
+        """Return nearest eligible chunks using the database's sqlite-vec index."""
         _validate_limit(limit)
         if not query_embedding:
             raise ValueError("query_embedding must contain at least one value")
         query_vector = serialize_float32([float(value) for value in query_embedding])
+        filter_parameters = _metadata_filter_parameters(filters)
         connection = self._open_database(load_vector_extension=True)
         try:
             rows = connection.execute(
@@ -84,30 +103,62 @@ class SQLiteHybridRetriever:
                        chunks.chunk_text,
                        chunks.topics,
                        chunks.metadata,
+                       chunks.published_at,
+                       chunks.speaker_name,
+                       chunks.talker_id,
+                       chunks.party,
+                       chunks.electorate,
+                       chunks.house,
+                       chunks.chamber,
+                       chunks.bill_ids,
+                       chunks.debate_category,
+                       chunks.debate_titles,
+                       chunks.speech_part_type,
                        nearest.distance
                 FROM (
                     SELECT chunk_id, distance
                     FROM chunk_embeddings
                     WHERE embedding MATCH ? AND k = ?
+                      AND (
+                        ? = 1 OR chunk_id IN (
+                            SELECT chunk_id
+                            FROM document_chunks
+                            WHERE (? = 1 OR talker_id IN (
+                                SELECT value FROM json_each(?)
+                            ))
+                              AND (? = 1 OR (
+                                source_id = 'hansard'
+                                AND (? = 1 OR published_at >= ?)
+                                AND (? = 1 OR published_at < ?)
+                            ))
+                        )
+                      )
                     ORDER BY distance
                 ) AS nearest
                 JOIN document_chunks AS chunks
                   ON chunks.chunk_id = nearest.chunk_id
                 ORDER BY nearest.distance
                 """,
-                (query_vector, limit),
+                (query_vector, limit, *filter_parameters),
             ).fetchall()
         finally:
             connection.close()
 
-        return [_chunk_result(row, vector_distance=float(row[9])) for row in rows]
+        return [_chunk_result(row, vector_distance=float(row[20])) for row in rows]
 
-    def search_bm25(self, *, query: str, limit: int = 10) -> list[SQLiteChunkResult]:
-        """Return chunks ranked by SQLite FTS5 BM25 over their text."""
+    def search_bm25(
+        self,
+        *,
+        query: str,
+        limit: int = 10,
+        filters: MetadataFilter | None = None,
+    ) -> list[SQLiteChunkResult]:
+        """Return eligible chunks ranked by SQLite FTS5 BM25 over their text."""
         _validate_limit(limit)
         fts_query = _to_fts_query(query)
         if not fts_query:
             return []
+        filter_parameters = _metadata_filter_parameters(filters)
 
         with self._fts_lock:
             rows = self._fts_connection.execute(
@@ -121,15 +172,39 @@ class SQLiteHybridRetriever:
                        chunk_text,
                        topics,
                        metadata,
-                       bm25(chunks_fts, 0, 0, 0, 0, 0, 0, 0, 0, 1.0) AS score
+                       published_at,
+                       speaker_name,
+                       talker_id,
+                       party,
+                       electorate,
+                       house,
+                       chamber,
+                       bill_ids,
+                       debate_category,
+                       debate_titles,
+                       speech_part_type,
+                       bm25(chunks_fts, 0, 0, 0, 0, 0, 0, 0, 0, 1.0,
+                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0) AS score
                 FROM chunks_fts
                 WHERE chunks_fts MATCH ?
+                  AND (
+                    ? = 1 OR (
+                        (? = 1 OR talker_id IN (
+                            SELECT value FROM json_each(?)
+                        ))
+                        AND (? = 1 OR (
+                            source_id = 'hansard'
+                            AND (? = 1 OR published_at >= ?)
+                            AND (? = 1 OR published_at < ?)
+                        ))
+                    )
+                  )
                 ORDER BY score ASC
                 LIMIT ?
                 """,
-                (fts_query, limit),
+                (fts_query, *filter_parameters, limit),
             ).fetchall()
-        return [_chunk_result(row, bm25_score=float(row[9])) for row in rows]
+        return [_chunk_result(row, bm25_score=float(row[20])) for row in rows]
 
     def search_hybrid(
         self,
@@ -138,14 +213,23 @@ class SQLiteHybridRetriever:
         query_embedding: Sequence[float],
         limit: int = 10,
         candidate_limit: int | None = None,
+        filters: MetadataFilter | None = None,
     ) -> list[SQLiteChunkResult]:
-        """Combine vector and BM25 rankings using reciprocal-rank fusion."""
+        """Filter vector and BM25 candidates before reciprocal-rank fusion."""
         _validate_limit(limit)
         candidates = candidate_limit if candidate_limit is not None else max(30, limit * 3)
         _validate_limit(candidates, name="candidate_limit")
 
-        vector_results = self.search_vector(query_embedding=query_embedding, limit=candidates)
-        lexical_results = self.search_bm25(query=query, limit=candidates)
+        vector_results = self.search_vector(
+            query_embedding=query_embedding,
+            limit=candidates,
+            filters=filters,
+        )
+        lexical_results = self.search_bm25(
+            query=query,
+            limit=candidates,
+            filters=filters,
+        )
         merged: dict[str, SQLiteChunkResult] = {}
         scores: dict[str, float] = {}
 
@@ -183,6 +267,17 @@ class SQLiteHybridRetriever:
                 topics UNINDEXED,
                 metadata UNINDEXED,
                 chunk_text,
+                published_at UNINDEXED,
+                speaker_name UNINDEXED,
+                talker_id UNINDEXED,
+                party UNINDEXED,
+                electorate UNINDEXED,
+                house UNINDEXED,
+                chamber UNINDEXED,
+                bill_ids UNINDEXED,
+                debate_category UNINDEXED,
+                debate_titles UNINDEXED,
+                speech_part_type UNINDEXED,
                 tokenize='unicode61'
             )
             """,
@@ -192,7 +287,10 @@ class SQLiteHybridRetriever:
             rows = connection.execute(
                 """
                 SELECT chunk_id, source_id, source_document_id, chunk_index,
-                       start_char, end_char, topics, metadata, chunk_text
+                       start_char, end_char, topics, metadata, chunk_text,
+                       published_at, speaker_name, talker_id, party, electorate,
+                       house, chamber, bill_ids, debate_category, debate_titles,
+                       speech_part_type
                 FROM document_chunks
                 """,
             )
@@ -200,10 +298,19 @@ class SQLiteHybridRetriever:
                 """
                 INSERT INTO chunks_fts (
                     chunk_id, source_id, source_document_id, chunk_index,
-                    start_char, end_char, topics, metadata, chunk_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    start_char, end_char, topics, metadata, chunk_text,
+                    published_at, speaker_name, talker_id, party, electorate,
+                    house, chamber, bill_ids, debate_category, debate_titles,
+                    speech_part_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                rows,
+                (
+                    (
+                        *row[:9],
+                        *row[9:],
+                    )
+                    for row in rows
+                ),
             )
         finally:
             connection.close()
@@ -244,9 +351,35 @@ def _chunk_result(
         chunk_text=str(row[6]),
         topics=str(row[7]) if row[7] is not None else None,
         metadata=str(row[8]) if row[8] is not None else None,
+        published_at=_optional_str(row[9]),
+        speaker_name=_optional_str(row[10]),
+        talker_id=_optional_str(row[11]),
+        party=_optional_str(row[12]),
+        electorate=_optional_str(row[13]),
+        house=_optional_str(row[14]),
+        chamber=_optional_str(row[15]),
+        bill_ids=_json_string_list(row[16]),
+        debate_category=_optional_str(row[17]),
+        debate_titles=_json_string_list(row[18]),
+        speech_part_type=_optional_str(row[19]),
         vector_distance=vector_distance,
         bm25_score=bm25_score,
     )
+
+
+def _optional_str(value: object) -> str | None:
+    """Return a retrieved field only when SQLite returned text."""
+    return value if isinstance(value, str) else None
+
+
+def _json_string_list(value: object) -> list[str] | None:
+    """Decode a JSON array of metadata strings from SQLite."""
+    if not isinstance(value, str):
+        return None
+    decoded = json.loads(value)
+    if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
+        raise ValueError("Expected a JSON array of strings in chunk metadata.")
+    return decoded
 
 
 def _as_int(value: object) -> int:
@@ -271,3 +404,29 @@ def _validate_limit(limit: int, *, name: str = "limit") -> None:
     """Reject nonpositive retrieval result limits."""
     if limit <= 0:
         raise ValueError(f"{name} must be greater than zero")
+
+
+def _metadata_filter_parameters(
+    filters: MetadataFilter | None,
+) -> tuple[object, ...]:
+    """Return parameterized constraints for the fixed vector and FTS SQL statements."""
+    has_filter = filters is not None and not filters.is_empty
+    has_speakers = filters is not None and bool(filters.talker_ids)
+    has_dates = filters is not None and (
+        filters.date_from is not None or filters.date_to is not None
+    )
+    start, end = utc_published_at_bounds(
+        date_from=filters.date_from if filters is not None else None,
+        date_to=filters.date_to if filters is not None else None,
+    )
+    talker_ids = json.dumps(filters.talker_ids if filters is not None else ())
+    return (
+        int(not has_filter),
+        int(not has_speakers),
+        talker_ids,
+        int(not has_dates),
+        int(start is None),
+        start,
+        int(end is None),
+        end,
+    )

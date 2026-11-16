@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Protocol
 
@@ -83,6 +84,17 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                     chunk_text TEXT NOT NULL,
                     topics TEXT,
                     metadata TEXT,
+                    published_at TEXT,
+                    speaker_name TEXT,
+                    talker_id TEXT,
+                    party TEXT,
+                    electorate TEXT,
+                    house TEXT,
+                    chamber TEXT,
+                    bill_ids TEXT,
+                    debate_category TEXT,
+                    debate_titles TEXT,
+                    speech_part_type TEXT,
                     UNIQUE (
                         source_id,
                         source_document_id,
@@ -92,6 +104,42 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                 )
                 """,
             )
+            async with db.execute("PRAGMA table_info(document_chunks)") as cursor:
+                existing_columns = {row[1] for row in await cursor.fetchall()}
+            metadata_columns = (
+                ("published_at", "ALTER TABLE document_chunks ADD COLUMN published_at TEXT"),
+                ("speaker_name", "ALTER TABLE document_chunks ADD COLUMN speaker_name TEXT"),
+                ("talker_id", "ALTER TABLE document_chunks ADD COLUMN talker_id TEXT"),
+                ("party", "ALTER TABLE document_chunks ADD COLUMN party TEXT"),
+                ("electorate", "ALTER TABLE document_chunks ADD COLUMN electorate TEXT"),
+                ("house", "ALTER TABLE document_chunks ADD COLUMN house TEXT"),
+                ("chamber", "ALTER TABLE document_chunks ADD COLUMN chamber TEXT"),
+                ("bill_ids", "ALTER TABLE document_chunks ADD COLUMN bill_ids TEXT"),
+                ("debate_category", "ALTER TABLE document_chunks ADD COLUMN debate_category TEXT"),
+                ("debate_titles", "ALTER TABLE document_chunks ADD COLUMN debate_titles TEXT"),
+                (
+                    "speech_part_type",
+                    "ALTER TABLE document_chunks ADD COLUMN speech_part_type TEXT",
+                ),
+            )
+            for name, statement in metadata_columns:
+                if name not in existing_columns:
+                    await db.execute(statement)
+            metadata_indexes = (
+                "CREATE INDEX IF NOT EXISTS idx_document_chunks_published_at "
+                "ON document_chunks (published_at)",
+                "CREATE INDEX IF NOT EXISTS idx_document_chunks_speaker_name "
+                "ON document_chunks (speaker_name)",
+                "CREATE INDEX IF NOT EXISTS idx_document_chunks_talker_id "
+                "ON document_chunks (talker_id)",
+                "CREATE INDEX IF NOT EXISTS idx_document_chunks_house ON document_chunks (house)",
+                "CREATE INDEX IF NOT EXISTS idx_document_chunks_chamber "
+                "ON document_chunks (chamber)",
+            )
+            for statement in metadata_indexes:
+                await db.execute(
+                    statement,
+                )
             await db.execute(
                 """CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings USING vec0(
                     chunk_id TEXT PRIMARY KEY,
@@ -117,8 +165,19 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                     end_char,
                     chunk_text,
                     topics,
-                    metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    metadata,
+                    published_at,
+                    speaker_name,
+                    talker_id,
+                    party,
+                    electorate,
+                    house,
+                    chamber,
+                    bill_ids,
+                    debate_category,
+                    debate_titles,
+                    speech_part_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chunk_id) DO UPDATE SET
                     document_checksum=excluded.document_checksum,
                     chunk_index=excluded.chunk_index,
@@ -126,7 +185,18 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                     end_char=excluded.end_char,
                     chunk_text=excluded.chunk_text,
                     topics=excluded.topics,
-                    metadata=excluded.metadata
+                    metadata=excluded.metadata,
+                    published_at=excluded.published_at,
+                    speaker_name=excluded.speaker_name,
+                    talker_id=excluded.talker_id,
+                    party=excluded.party,
+                    electorate=excluded.electorate,
+                    house=excluded.house,
+                    chamber=excluded.chamber,
+                    bill_ids=excluded.bill_ids,
+                    debate_category=excluded.debate_category,
+                    debate_titles=excluded.debate_titles,
+                    speech_part_type=excluded.speech_part_type
                 """,
                 [
                     (
@@ -140,6 +210,19 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                         chunk.chunk_text,
                         json.dumps(chunk.topics) if chunk.topics is not None else None,
                         json.dumps(chunk.metadata) if chunk.metadata is not None else None,
+                        chunk.published_at,
+                        chunk.speaker_name,
+                        chunk.talker_id,
+                        chunk.party,
+                        chunk.electorate,
+                        chunk.house,
+                        chunk.chamber,
+                        json.dumps(chunk.bill_ids) if chunk.bill_ids is not None else None,
+                        chunk.debate_category,
+                        json.dumps(chunk.debate_titles)
+                        if chunk.debate_titles is not None
+                        else None,
+                        chunk.speech_part_type,
                     )
                     for chunk in chunks
                 ],
@@ -206,7 +289,18 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                     end_char,
                     chunk_text,
                     topics,
-                    metadata
+                    metadata,
+                    published_at,
+                    speaker_name,
+                    talker_id,
+                    party,
+                    electorate,
+                    house,
+                    chamber,
+                    bill_ids,
+                    debate_category,
+                    debate_titles,
+                    speech_part_type
                 FROM document_chunks
                 WHERE chunk_id = ?
                 """,
@@ -222,19 +316,7 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
         embedding = None
         if emb_row is not None:
             embedding = deserialize_f32(emb_row[1])
-        return DocumentChunk(
-            chunk_id=row[0],
-            source_id=row[1],
-            source_document_id=row[2],
-            document_checksum=row[3],
-            chunk_index=row[4],
-            start_char=row[5],
-            end_char=row[6],
-            chunk_text=row[7],
-            embedding=embedding,
-            topics=json.loads(row[8]) if row[8] else None,
-            metadata=json.loads(row[9]) if row[9] else None,
-        )
+        return _document_chunk_from_row(row, embedding=embedding)
 
     async def list_chunks(
         self,
@@ -258,7 +340,18 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                     end_char,
                     chunk_text,
                     topics,
-                    metadata
+                    metadata,
+                    published_at,
+                    speaker_name,
+                    talker_id,
+                    party,
+                    electorate,
+                    house,
+                    chamber,
+                    bill_ids,
+                    debate_category,
+                    debate_titles,
+                    speech_part_type
                 FROM document_chunks
             """
             filters: list[str] = []
@@ -279,22 +372,7 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
             ) as curs:
                 emb_rows = await curs.fetchall()
         emb_map = {row[0]: deserialize_f32(row[1]) for row in emb_rows}
-        return [
-            DocumentChunk(
-                chunk_id=row[0],
-                source_id=row[1],
-                source_document_id=row[2],
-                document_checksum=row[3],
-                chunk_index=row[4],
-                start_char=row[5],
-                end_char=row[6],
-                chunk_text=row[7],
-                topics=json.loads(row[8]) if row[8] else None,
-                metadata=json.loads(row[9]) if row[9] else None,
-                embedding=emb_map.get(row[0]),
-            )
-            for row in rows
-        ]
+        return [_document_chunk_from_row(row, embedding=emb_map.get(row[0])) for row in rows]
 
     async def list_chunks_without_embedding(
         self,
@@ -314,7 +392,18 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                     dc.end_char,
                     dc.chunk_text,
                     dc.topics,
-                    dc.metadata
+                    dc.metadata,
+                    dc.published_at,
+                    dc.speaker_name,
+                    dc.talker_id,
+                    dc.party,
+                    dc.electorate,
+                    dc.house,
+                    dc.chamber,
+                    dc.bill_ids,
+                    dc.debate_category,
+                    dc.debate_titles,
+                    dc.speech_part_type
                 FROM document_chunks dc
                 LEFT JOIN chunk_embeddings ce ON dc.chunk_id = ce.chunk_id
                 WHERE ce.chunk_id IS NULL
@@ -325,21 +414,7 @@ class SQLiteDocumentChunkRepository(AbstractChunkRepository):
                 vars.append(source_id)
             async with db.execute(query, tuple(vars)) as curs:
                 rows = await curs.fetchall()
-        return [
-            DocumentChunk(
-                chunk_id=row[0],
-                source_id=row[1],
-                source_document_id=row[2],
-                document_checksum=row[3],
-                chunk_index=row[4],
-                start_char=row[5],
-                end_char=row[6],
-                chunk_text=row[7],
-                topics=json.loads(row[8]) if row[8] else None,
-                metadata=json.loads(row[9]) if row[9] else None,
-            )
-            for row in rows
-        ]
+        return [_document_chunk_from_row(row) for row in rows]
 
 
 class FilesystemDocumentChunkRepository:
@@ -374,7 +449,7 @@ class FilesystemDocumentChunkRepository:
 
         with self._state_path.open("a", encoding="utf-8") as handle:
             for chunk in chunks:
-                record: dict[str, int | str] = {
+                record: dict[str, object] = {
                     "chunk_id": chunk.chunk_id,
                     "source_id": chunk.source_id,
                     "source_document_id": chunk.source_document_id,
@@ -383,6 +458,18 @@ class FilesystemDocumentChunkRepository:
                     "start_char": chunk.start_char,
                     "end_char": chunk.end_char,
                     "chunk_text": chunk.chunk_text,
+                    "metadata": chunk.metadata,
+                    "published_at": chunk.published_at,
+                    "speaker_name": chunk.speaker_name,
+                    "talker_id": chunk.talker_id,
+                    "party": chunk.party,
+                    "electorate": chunk.electorate,
+                    "house": chunk.house,
+                    "chamber": chunk.chamber,
+                    "bill_ids": chunk.bill_ids,
+                    "debate_category": chunk.debate_category,
+                    "debate_titles": chunk.debate_titles,
+                    "speech_part_type": chunk.speech_part_type,
                 }
                 handle.write(json.dumps(record, ensure_ascii=True) + "\n")
         return len(chunks)
@@ -425,6 +512,50 @@ class FilesystemDocumentChunkRepository:
                     start_char=payload["start_char"],
                     end_char=payload["end_char"],
                     chunk_text=payload["chunk_text"],
+                    metadata=payload.get("metadata"),
+                    published_at=payload.get("published_at"),
+                    speaker_name=payload.get("speaker_name"),
+                    talker_id=payload.get("talker_id"),
+                    party=payload.get("party"),
+                    electorate=payload.get("electorate"),
+                    house=payload.get("house"),
+                    chamber=payload.get("chamber"),
+                    bill_ids=payload.get("bill_ids"),
+                    debate_category=payload.get("debate_category"),
+                    debate_titles=payload.get("debate_titles"),
+                    speech_part_type=payload.get("speech_part_type"),
                 ),
             )
         return chunks
+
+
+def _document_chunk_from_row(
+    row: sqlite3.Row,
+    *,
+    embedding: list[float] | None = None,
+) -> DocumentChunk:
+    """Rebuild a typed chunk from its ordered SQLite record."""
+    return DocumentChunk(
+        chunk_id=row[0],
+        source_id=row[1],
+        source_document_id=row[2],
+        document_checksum=row[3],
+        chunk_index=row[4],
+        start_char=row[5],
+        end_char=row[6],
+        chunk_text=row[7],
+        topics=json.loads(row[8]) if row[8] else None,
+        metadata=json.loads(row[9]) if row[9] else None,
+        embedding=embedding,
+        published_at=row[10],
+        speaker_name=row[11],
+        talker_id=row[12],
+        party=row[13],
+        electorate=row[14],
+        house=row[15],
+        chamber=row[16],
+        bill_ids=json.loads(row[17]) if row[17] else None,
+        debate_category=row[18],
+        debate_titles=json.loads(row[19]) if row[19] else None,
+        speech_part_type=row[20],
+    )

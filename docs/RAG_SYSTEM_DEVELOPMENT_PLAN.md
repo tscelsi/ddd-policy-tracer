@@ -15,9 +15,9 @@ adding more model complexity.
 
 The active retriever is
 [`ddd_policy_tracer/retrieval/sqlite_retrieval.py`](../ddd_policy_tracer/retrieval/sqlite_retrieval.py).
-It provides vector, BM25, and hybrid search. It does not currently expose
-metadata filters, reranking, or answer generation. Its FTS5 index is copied
-into memory when the retriever is initialized.
+It provides vector, BM25, and hybrid search with typed speaker/date filters.
+Metadata constraints are applied before both candidate limits. Its FTS5 index
+is copied into memory when the retriever is initialized.
 
 The schema declared by
 [`ddd_policy_tracer/enrichment/chunking/adapters.py`](../ddd_policy_tracer/enrichment/chunking/adapters.py)
@@ -34,12 +34,14 @@ was available in the repository to inspect directly.
 Hansard ingestion already has richer data than the chunk record makes readily
 filterable. [`SpeechPart`](../ddd_policy_tracer/ingestion/hansard/part_repository.py)
 includes date, house, chamber, bill IDs, debate descriptors, talker ID, and
-speech-part type. The Hansard conversion service currently persists the date as
-`published_at` and the talker record in source-document metadata, but does not
-copy the other speech-part fields into that metadata.
+speech-part type. The Hansard conversion service persists these fields in
+source-document metadata, and the chunking layer carries them into typed chunk
+columns. Dates are normalized to UTC so inclusive Canberra date constraints
+can be compared consistently.
 [`MarkdownChunker`](../ddd_policy_tracer/enrichment/chunking/chunking.py)
 carries source-document metadata into chunk metadata under `doc_metadata`.
-Thus, some filters need an ingestion change as well as a retrieval change.
+Existing chunk rows can be updated with
+[`scripts/backfill_hansard_chunk_metadata.py`](../scripts/backfill_hansard_chunk_metadata.py).
 
 ## Recommended implementation order
 
@@ -123,6 +125,13 @@ metrics for the current retriever.
 
 ### Phase 2 — Preserve and filter parliamentary metadata
 
+Hansard ingestion and chunk persistence retain the candidate fields below as
+explicit chunk attributes and SQLite columns, while keeping extensible source
+metadata. The retrieval result also exposes these fields. Completion uses a
+single structured extraction request with the configured answer provider to
+derive speaker and date constraints, then resolves names against the Mongo
+talker catalog.
+
 First retain the fields required for useful Hansard searches. Candidate
 metadata includes:
 
@@ -139,15 +148,18 @@ chamber, speaker/talker, and bill), prefer typed/indexed columns or a normalized
 metadata table over repeatedly parsing JSON. Preserve extensibility for
 infrequent metadata.
 
-Add a typed filter contract to vector, BM25, and hybrid retrieval. Ensure that
-filters constrain candidate generation, not merely the final top-k list. A
-filter applied after nearest-neighbor top-k can return too few results even
-when matching chunks exist farther down the unfiltered ranking. Define and
-test behavior for absent metadata and combinations of filters.
+The current filter contract supports speaker IDs and date/date-range bounds.
+Multiple speakers combine with OR; speaker and date dimensions combine with
+AND. Filters constrain candidate generation, not merely the final top-k list.
+A requested but unsupported constraint, or an unknown/ambiguous speaker,
+returns a clarification response rather than silently dropping the constraint.
+No matching chunks do not trigger an unfiltered retry.
 
-**Exit criteria:** each supported field survives Hansard ingestion and chunking;
-filtered vector, BM25, and hybrid searches return only matching chunks; the
-evaluation set confirms filtered recall and expected empty-result behavior.
+**Implemented:** supported fields survive ingestion and chunking; filtered
+vector, BM25, and hybrid searches return only matching chunks; regression tests
+cover pre-top-k filtering, conjunction/disjunction, ambiguous names,
+clarification, and empty-result behavior. Evaluation-set measurement and
+additional metadata dimensions remain follow-up work.
 
 ### Phase 3 — Add a second-stage reranker
 

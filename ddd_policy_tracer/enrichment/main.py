@@ -17,6 +17,7 @@ async def main() -> None:
     chunk_repo = SQLiteDocumentChunkRepository(
         db_manager=DbManager.get_instance("data/new2.db"),
     )
+    await chunk_repo.init()
     chunks = await chunk_repo.list_chunks(source_id="committees")
     await run_full_pipeline_on_chunks(
         chunks=chunks,

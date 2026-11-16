@@ -6,7 +6,7 @@ from ddd_policy_tracer.ingestion.adapters import FilesystemSourceDocumentReposit
 from ddd_policy_tracer.ingestion.domain import SourceDocument, compute_checksum
 from ddd_policy_tracer.ingestion.hansard.part_repository import AbstractPartRepository
 from ddd_policy_tracer.ingestion.hansard.talker_repository import AbstractTalkerRepository
-from ddd_policy_tracer.utils.time_helpers import utc_now_isoformat
+from ddd_policy_tracer.utils.time_helpers import utc_isoformat, utc_now_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def convert_speeches_to_documents(
             source_id="hansard",
             source_document_id=f"{talker.id}_{part.id}",
             source_url=None,
-            published_at=part.date.isoformat(),
+            published_at=utc_isoformat(part.date),
             retrieved_at=now,
             checksum=compute_checksum(part.speech_content.encode("utf-8")),
             normalized_text=part.speech_content,
@@ -43,6 +43,15 @@ async def convert_speeches_to_documents(
             updated_at=now,
             metadata={
                 "talker": talker.model_dump(),
+                "talker_id": part.talker_id,
+                "house": part.house.value,
+                "chamber": part.chamber.value,
+                "bill_ids": part.bill_ids,
+                "debate_category": part.debate_category,
+                "debate_titles": [
+                    title for title in (part.subdebate_1_title, part.subdebate_2_title) if title
+                ],
+                "speech_part_type": part.speech_part_type.value,
             },
         )
         processed_documents += 1
