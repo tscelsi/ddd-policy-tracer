@@ -3,9 +3,40 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date
 from typing import Literal, Protocol
 
 from torch import Tensor
+
+
+@dataclass(frozen=True)
+class RetrievalFilters:
+    """Constrain parliamentary evidence by speaker identities and inclusive dates."""
+
+    talker_ids: tuple[str, ...] = ()
+    start_date: date | None = None
+    end_date: date | None = None
+
+    def __post_init__(self) -> None:
+        """Reject contradictory or empty speaker identities in a retrieval constraint."""
+        if any(
+            not isinstance(talker_id, str) or not talker_id.strip() for talker_id in self.talker_ids
+        ):
+            raise ValueError("talker_ids must not contain empty values")
+        object.__setattr__(
+            self,
+            "talker_ids",
+            tuple(dict.fromkeys(talker_id.strip() for talker_id in self.talker_ids)),
+        )
+        if self.start_date is not None and self.end_date is not None:
+            if self.start_date > self.end_date:
+                raise ValueError("start_date must not be after end_date")
+
+    @property
+    def has_constraints(self) -> bool:
+        """Report whether a speaker or date constraint was requested."""
+        return bool(self.talker_ids or self.start_date is not None or self.end_date is not None)
 
 
 class RetrievedChunk(Protocol):
@@ -55,8 +86,9 @@ class HybridChunkRetriever(Protocol):
         query_embedding: Sequence[float],
         limit: int = 10,
         candidate_limit: int | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> Sequence[RetrievedChunk]:
-        """Return ranked evidence chunks for a lexical and semantic query."""
+        """Return ranked evidence chunks satisfying optional parliamentary constraints."""
         ...
 
 
@@ -86,6 +118,7 @@ def retrieve_ranked_evidence(
     embedding_service: QueryEmbedder,
     limit: int = 10,
     candidate_limit: int | None = None,
+    filters: RetrievalFilters | None = None,
 ) -> Sequence[RetrievedChunk]:
     """Return ranked evidence chunks with citation provenance intact."""
     if not query.strip():
@@ -101,6 +134,7 @@ def retrieve_ranked_evidence(
         query_embedding=query_embedding,
         limit=limit,
         candidate_limit=candidate_limit,
+        filters=filters,
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -12,7 +13,7 @@ import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32
 from torch import Tensor
 
-from ddd_policy_tracer.retrieval.service_layer import retrieve_evidence_chunks
+from ddd_policy_tracer.retrieval.service_layer import RetrievalFilters, retrieve_evidence_chunks
 from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 
 
@@ -169,6 +170,170 @@ def test_hybrid_search_fuses_vector_and_bm25_rankings(tmp_path: Path) -> None:
     assert all(result.fused_score is not None for result in results)
     assert by_id["chunk-vector"].vector_distance == 0.0
     assert by_id["chunk-lexical"].bm25_score is not None
+
+
+def test_hybrid_search_applies_metadata_filters_before_candidate_limits(tmp_path: Path) -> None:
+    """Keep matching Hansard chunks eligible before vector and BM25 candidate limits."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+    connection = sqlite3.connect(database_path)
+    connection.executemany(
+        "UPDATE document_chunks SET metadata = ? WHERE chunk_id = ?",
+        [
+            (
+                '{"doc_metadata":{"talker_id":"1","published_at":"2025-01-01T00:00:00+00:00"}}',
+                "chunk-vector",
+            ),
+            (
+                '{"doc_metadata":{"talker_id":"2","published_at":"2025-02-01T00:00:00+00:00"}}',
+                "chunk-lexical",
+            ),
+            (
+                '{"doc_metadata":{"talker_id":"3","published_at":"2025-02-01T00:00:00+00:00"}}',
+                "chunk-unrelated",
+            ),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    filters = RetrievalFilters(
+        talker_ids=("2",),
+        start_date=date(2025, 2, 1),
+        end_date=date(2025, 2, 1),
+    )
+    with SQLiteHybridRetriever(database_path) as retriever:
+        results = retriever.search_hybrid(
+            query="renewable energy",
+            query_embedding=[0.0, 1.0, 0.0],
+            limit=1,
+            candidate_limit=1,
+            filters=filters,
+        )
+
+    assert [result.chunk_id for result in results] == ["chunk-lexical"]
+    assert results[0].vector_distance is not None
+    assert results[0].bm25_score is not None
+
+
+def test_filters_allow_speaker_alternatives_and_intersect_with_dates(tmp_path: Path) -> None:
+    """Keep either requested speaker while requiring the shared inclusive date range."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+    connection = sqlite3.connect(database_path)
+    connection.executemany(
+        "UPDATE document_chunks SET metadata = ? WHERE chunk_id = ?",
+        [
+            (
+                '{"doc_metadata":{"talker_id":"1","published_at":"2025-02-01T10:00:00+00:00"}}',
+                "chunk-vector",
+            ),
+            (
+                '{"doc_metadata":{"talker_id":"2","published_at":"2025-02-01"}}',
+                "chunk-lexical",
+            ),
+            (
+                '{"doc_metadata":{"talker_id":"2","published_at":"2025-02-02T10:00:00+00:00"}}',
+                "chunk-unrelated",
+            ),
+        ],
+    )
+    connection.execute(
+        "UPDATE document_chunks SET source_id = 'other' WHERE chunk_id = 'chunk-unrelated'",
+    )
+    connection.commit()
+    connection.close()
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        results = retriever.search_hybrid(
+            query="renewable energy",
+            query_embedding=[0.0, 1.0, 0.0],
+            limit=3,
+            filters=RetrievalFilters(
+                talker_ids=("1", "2"),
+                start_date=date(2025, 2, 1),
+                end_date=date(2025, 2, 1),
+            ),
+        )
+        no_matches = retriever.search_hybrid(
+            query="renewable energy",
+            query_embedding=[0.0, 1.0, 0.0],
+            limit=3,
+            filters=RetrievalFilters(talker_ids=("unknown",)),
+        )
+
+    assert {result.chunk_id for result in results} == {"chunk-vector", "chunk-lexical"}
+    assert no_matches == []
+
+
+def test_date_filter_uses_canberra_midnight_across_daylight_saving(tmp_path: Path) -> None:
+    """Include the full Canberra date even when its UTC boundaries span a DST transition."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+    connection = sqlite3.connect(database_path)
+    connection.executemany(
+        "UPDATE document_chunks SET metadata = ? WHERE chunk_id = ?",
+        [
+            (
+                '{"doc_metadata":{"published_at":"2025-10-04T13:59:59+00:00"}}',
+                "chunk-vector",
+            ),
+            (
+                '{"doc_metadata":{"published_at":"2025-10-04T14:00:00+00:00"}}',
+                "chunk-lexical",
+            ),
+            (
+                '{"doc_metadata":{"published_at":"2025-10-05T12:59:59+00:00"}}',
+                "chunk-unrelated",
+            ),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        results = retriever.search_vector(
+            query_embedding=[0.0, 1.0, 0.0],
+            limit=3,
+            filters=RetrievalFilters(
+                start_date=date(2025, 10, 5),
+                end_date=date(2025, 10, 5),
+            ),
+        )
+
+    assert {result.chunk_id for result in results} == {"chunk-lexical", "chunk-unrelated"}
+
+
+def test_open_ended_dates_use_legacy_hansard_document_identity(tmp_path: Path) -> None:
+    """Apply one-sided date bounds to older chunks without publication metadata."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+    connection = sqlite3.connect(database_path)
+    connection.executemany(
+        "UPDATE document_chunks SET metadata = NULL, source_document_id = ? WHERE chunk_id = ?",
+        [
+            ("1_2025-01-31_hor_main", "chunk-vector"),
+            ("2_2025-02-01_hor_main", "chunk-lexical"),
+            ("3_2025-02-02_hor_main", "chunk-unrelated"),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        from_date = retriever.search_vector(
+            query_embedding=[0.0, 1.0, 0.0],
+            limit=3,
+            filters=RetrievalFilters(start_date=date(2025, 2, 1)),
+        )
+        through_date = retriever.search_vector(
+            query_embedding=[0.0, 1.0, 0.0],
+            limit=3,
+            filters=RetrievalFilters(end_date=date(2025, 1, 31)),
+        )
+
+    assert {result.chunk_id for result in from_date} == {"chunk-lexical", "chunk-unrelated"}
+    assert {result.chunk_id for result in through_date} == {"chunk-vector"}
 
 
 def test_hybrid_search_supports_a_worker_thread(tmp_path: Path) -> None:

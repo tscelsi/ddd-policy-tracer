@@ -8,6 +8,14 @@ from dataclasses import dataclass
 
 from openai import OpenAI
 
+from ddd_policy_tracer.answering.metadata_filter_extraction import (
+    FILTER_EXTRACTION_PROMPT,
+    FILTER_EXTRACTION_SCHEMA,
+    MetadataFilterExtractionError,
+    MetadataFilterIntent,
+    build_filter_request_content,
+    parse_filter_intent,
+)
 from ddd_policy_tracer.answering.service_layer import (
     AnswerDraft,
     EvidenceChunk,
@@ -49,9 +57,7 @@ class OpenAIAnswerGenerator:
         """Use an injected OpenAI client or create one from its environment configuration."""
         self.config = config or OpenAIAnswerGeneratorConfig()
         self._client = (
-            client
-            if client is not None
-            else OpenAI(timeout=self.config.request_timeout_seconds)
+            client if client is not None else OpenAI(timeout=self.config.request_timeout_seconds)
         )
 
     def generate(
@@ -104,3 +110,35 @@ class OpenAIAnswerGenerator:
         if message.content is None:
             raise ValueError("OpenAI returned an empty answer response")
         return parse_answer_draft(message.content, provider="OpenAI")
+
+    def extract_filters(self, question: str) -> MetadataFilterIntent:
+        """Extract only supported metadata constraints using the configured OpenAI model."""
+        response = self._client.chat.completions.create(
+            model=self.config.model,
+            messages=[
+                {"role": "system", "content": FILTER_EXTRACTION_PROMPT},
+                {
+                    "role": "user",
+                    "content": build_filter_request_content(question),
+                },
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "parliamentary_metadata_filters",
+                    "strict": True,
+                    "schema": FILTER_EXTRACTION_SCHEMA,
+                },
+            },
+            temperature=0,
+        )
+        if not response.choices:
+            raise MetadataFilterExtractionError("OpenAI returned no metadata filter choices")
+        message = response.choices[0].message
+        if message.refusal:
+            raise MetadataFilterExtractionError(
+                f"OpenAI refused to extract metadata filters: {message.refusal}",
+            )
+        if message.content is None:
+            raise MetadataFilterExtractionError("OpenAI returned an empty metadata filter response")
+        return parse_filter_intent(message.content, provider="OpenAI")

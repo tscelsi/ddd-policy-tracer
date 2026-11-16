@@ -11,8 +11,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from ollama import ResponseError
 from openai import APIError as OpenAIError
 from pydantic import BaseModel, ConfigDict, Field
+from pymongo.errors import PyMongoError
 
-from ddd_policy_tracer.answering.completion_service import RagCompletionService
+from ddd_policy_tracer.answering.completion_service import CompletionRun, RagCompletionService
+from ddd_policy_tracer.answering.metadata_filter_extraction import MetadataFilterExtractionError
 from ddd_policy_tracer.answering.service_layer import SynthesizedAnswer
 
 logger = logging.getLogger(__name__)
@@ -43,10 +45,12 @@ class CitationResponse(BaseModel):
 class CompletionResponse(BaseModel):
     """Return a synthesized answer, citations, and abstention state."""
 
-    answer: str
+    answer: str | None
     citations: list[CitationResponse]
     abstained: bool
     abstention_reason: str | None
+    clarification_required: bool
+    clarification_question: str | None
 
     @classmethod
     def from_answer(cls, answer: SynthesizedAnswer) -> CompletionResponse:
@@ -68,7 +72,25 @@ class CompletionResponse(BaseModel):
             ],
             abstained=answer.abstained,
             abstention_reason=answer.abstention_reason,
+            clarification_required=False,
+            clarification_question=None,
         )
+
+    @classmethod
+    def from_run(cls, run: CompletionRun) -> CompletionResponse:
+        """Convert a completion result into answer or clarification HTTP fields."""
+        if run.clarification_required:
+            return cls(
+                answer=None,
+                citations=[],
+                abstained=False,
+                abstention_reason=None,
+                clarification_required=True,
+                clarification_question=run.clarification_question,
+            )
+        if run.answer is None:
+            raise RuntimeError("completion result has neither an answer nor a clarification")
+        return cls.from_answer(run.answer)
 
 
 def get_completion_service(request: Request) -> RagCompletionService:
@@ -95,23 +117,37 @@ def create_completion(
     request_started = perf_counter()
     try:
         run = completion_service.complete(payload.question, limit=payload.limit)
+    except MetadataFilterExtractionError as exc:
+        logger.warning("Answer generation provider returned invalid metadata filters")
+        raise HTTPException(
+            status_code=502,
+            detail="The answer generation provider returned invalid metadata filters.",
+        ) from exc
     except ValueError as exc:
-        logger.exception("Answer generation failed due to invalid input")
+        logger.warning("Completion rejected invalid structured input")
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
     except (httpx.HTTPError, OpenAIError, ResponseError) as exc:
-        logger.exception("Answer generation provider is unavailable")
+        logger.warning("Answer generation provider is unavailable")
         raise HTTPException(
             status_code=503,
             detail="The answer generation provider is unavailable.",
         ) from exc
-    completion_response = CompletionResponse.from_answer(run.answer)
+    except PyMongoError as exc:
+        logger.warning("Completion dependency is unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="The Hansard speaker catalog is unavailable.",
+        ) from exc
+    completion_response = CompletionResponse.from_run(run)
     total_ms = (perf_counter() - request_started) * 1000
     timings = run.timings
     response.headers["Server-Timing"] = ", ".join(
         (
+            f"filter_extraction;dur={timings.filter_extraction_ms:.3f}",
+            f"speaker_resolution;dur={timings.speaker_resolution_ms:.3f}",
             f"embedding;dur={timings.embedding_ms:.3f}",
             f"hybrid_retrieval;dur={timings.hybrid_retrieval_ms:.3f}",
             f"generation;dur={timings.generation_ms:.3f}",
@@ -122,11 +158,14 @@ def create_completion(
         "completion_timing",
         extra={
             "embedding_ms": timings.embedding_ms,
+            "filter_extraction_ms": timings.filter_extraction_ms,
+            "speaker_resolution_ms": timings.speaker_resolution_ms,
             "hybrid_retrieval_ms": timings.hybrid_retrieval_ms,
             "generation_ms": timings.generation_ms,
             "completion_ms": total_ms,
             "evidence_count": run.evidence_count,
-            "abstained": run.answer.abstained,
+            "abstained": run.answer.abstained if run.answer is not None else False,
+            "clarification_required": run.clarification_required,
         },
     )
     return completion_response

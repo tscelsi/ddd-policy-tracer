@@ -28,13 +28,22 @@
   - Downstream: knowledge graph materialization and analyst query services.
 
 ### Retrieval (new, minimal v1)
-- Responsibility: Ingest `SourceDocument` and `DocumentChunk` records into a graph database and answer similarity queries using chunk embedding vectors.
-- Owns language: Graph Store, Chunk Embedding, Retrieval Query, Similarity Score, SourceDocument node, DocumentChunk node.
-- Does not own: extraction, canonicalization, or policy judgment beyond ranking matched chunks.
+- Responsibility: Retrieve ranked evidence from indexed `DocumentChunk` records using vector, BM25, and hybrid search; apply typed speaker and date constraints before candidate ranking.
+- Owns language: Retrieval Query, Retrieval Filters, Evidence Chunk, Similarity Score, Speaker Identity, Metadata Filter Intent.
+- Does not own: filter-intent extraction, answer synthesis, extraction, canonicalization, or policy judgment beyond ranking matched chunks.
 - Integrations:
   - Upstream from Document Acquisition and Analysis chunk persistence.
-  - Persistence adapter: FalkorDB graph instance for node/edge storage.
-  - Retrieval operations: cosine-similarity ranking over `chunk.embeddings`.
+  - Persistence adapter: SQLite chunk records, sqlite-vec embeddings, and an in-memory FTS5 index.
+  - Retrieval operations: filtered vector and BM25 candidate generation followed by reciprocal-rank fusion.
+
+### Answering (application service)
+- Responsibility: Extract supported retrieval constraints, resolve requested Hansard speakers, coordinate evidence retrieval, and synthesize cited answers or clarifications.
+- Owns language: Completion Request, Metadata Filter Intent, Clarification Required, Answer Citation.
+- Does not own: parliamentary speaker identity data, chunk persistence, or answer-provider infrastructure.
+- Integrations:
+  - Outbound to the configured Ollama or OpenAI provider for filter extraction and answer synthesis.
+  - Outbound to the Hansard talker catalog only when speaker resolution is requested.
+  - Outbound to Retrieval with the original question and validated `Retrieval Filters`.
 
 ## Context map (draft)
 
@@ -47,8 +56,10 @@
 - Analysis -> Chunk Persistence Adapter: persist `DocumentChunk` records for each document version.
 - Analysis -> Extraction Persistence Adapter: persist `ClaimCandidate` and `EntityMention` records.
 - Analysis -> Future Graph Context: emit graph-ready assertions and provenance metadata.
-- Retrieval -> FalkorDB Graph Store: persist `SourceDocument` and `DocumentChunk` nodes with `HAS_CHUNK` relationships and chunk embedding properties.
-- Retrieval -> Similarity Query Service: rank stored `DocumentChunk` nodes by cosine similarity against a query embedding.
+- Answering -> Retrieval: pass the original question and typed speaker/date constraints to candidate generation.
+- Answering -> Hansard Talker Catalog: lazily resolve canonical names, first-last names, and unique surnames to stable talker IDs.
+- Retrieval -> SQLite Chunk Store: apply valid constraints to vector and BM25 candidates before their respective limits.
+- Retrieval -> Answering: return hybrid-ranked evidence for citation-backed synthesis.
 
 ## Aggregate candidates
 
@@ -61,8 +72,8 @@
 ### Retrieval
 | Aggregate root | Purpose | Invariants | Consistency boundary |
 | --- | --- | --- | --- |
-| SourceDocument Graph Node | Represent an ingested source document as a graph node with provenance and text metadata. | Node key is `source_document_id`; one document node may own many chunk nodes; metadata must remain linked to the originating source version. | Per document identity in the graph.
-| DocumentChunk Graph Node | Represent one chunk snapshot and its semantic embedding. | `chunk_id` is unique; a `chunk.embedding` array is optional but required for semantic search; each chunk must reference its parent source document via `HAS_CHUNK`. | Per chunk identity and parent document relationship.
+| Retrieval Filters (value object) | Constrain one completion's candidate search to speaker identities and/or an inclusive date range. | Speaker IDs are OR alternatives; speaker and date dimensions combine with AND; date bounds are Canberra calendar dates; requested constraints are never silently dropped. | Per completion request.
+| Indexed Document Chunk (owned by Analysis) | Supply searchable text, provenance, metadata, and optional vector embedding to retrieval. | Filters apply to Hansard chunks before vector and BM25 candidate limits; returned records retain source metadata for citation. | Per indexed chunk snapshot.
 
 ## Commands and domain events (candidates)
 

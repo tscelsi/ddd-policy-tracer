@@ -6,10 +6,13 @@ Build a question-answering system over Australian parliamentary speeches that
 answers from retrieved evidence, exposes where that evidence came from, and
 abstains when the corpus does not support an answer.
 
-The current retrieval implementation is a useful starting point: SQLite vector
-search with sqlite-vec, FTS5 BM25, and reciprocal-rank fusion. This plan
-prioritizes measurable retrieval quality and reliable evidence handling before
-adding more model complexity.
+The active retrieval implementation combines SQLite vector search with
+sqlite-vec, FTS5 BM25, and reciprocal-rank fusion. Completion requests extract
+date and speaker constraints with the configured answer provider, resolve
+speaker names against the Hansard catalog on demand, and apply valid filters
+before vector and BM25 candidate limits. This plan prioritizes measurable
+retrieval quality and reliable evidence handling before adding more model
+complexity.
 
 ## Current state and schema findings
 
@@ -29,17 +32,35 @@ contains:
 - `topics` and `metadata` are JSON text fields, not typed filter columns.
 
 These are schema definitions in the repository; no populated SQLite database
-was available in the repository to inspect directly.
+was available in the repository to inspect directly. The retrieval filter
+contract reads `published_at` and `talker_id` from existing chunk metadata, so
+no SQLite columns are added.
 
 Hansard ingestion already has richer data than the chunk record makes readily
 filterable. [`SpeechPart`](../ddd_policy_tracer/ingestion/hansard/part_repository.py)
 includes date, house, chamber, bill IDs, debate descriptors, talker ID, and
-speech-part type. The Hansard conversion service currently persists the date as
-`published_at` and the talker record in source-document metadata, but does not
-copy the other speech-part fields into that metadata.
+speech-part type. The Hansard conversion service persists a UTC `published_at`
+timestamp and stable `talker_id` in source-document metadata, alongside the
+talker record.
 [`MarkdownChunker`](../ddd_policy_tracer/enrichment/chunking/chunking.py)
 carries source-document metadata into chunk metadata under `doc_metadata`.
-Thus, some filters need an ingestion change as well as a retrieval change.
+Online V1 filters support Canberra calendar-date ranges and speaker identities;
+other explicitly requested dimensions return a clarification instead of being
+silently ignored.
+
+### Metadata filter behavior (implemented)
+
+- The configured answer provider extracts strict date, speaker, unsupported,
+  and clarification fields without rewriting the original question.
+- Speaker names resolve by canonical name, first-and-last name, or unique
+  surname. The Mongo talker catalog loads on first speaker lookup and remains
+  cached for the process lifetime (`MONGO_URI` defaults to localhost).
+- Inclusive Australia/Canberra date bounds are converted to UTC at the SQLite
+  query boundary. Filters apply to Hansard chunks and constrain vector and
+  BM25 candidate generation before each candidate limit.
+- Unknown or ambiguous speakers, unclear intent, and unsupported constraints
+  stop before embedding and retrieval. A valid filtered search with no evidence
+  remains an abstention; it is never retried without filters.
 
 ## Recommended implementation order
 

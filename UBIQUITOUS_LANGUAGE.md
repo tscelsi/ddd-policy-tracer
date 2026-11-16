@@ -65,6 +65,19 @@
 | Completed With Failures | An acquisition run finished with at least one failed item and at least one successful item. | Partial | No |
 | Failed (Run) | An acquisition run failed at the run level (for example startup/system failure) and could not complete normal processing. | Crashed | No |
 
+## Context: Retrieval and Answering
+
+### Canonical terms
+
+| Term | Definition | Aliases to avoid | Ambiguity flag |
+| --- | --- | --- | --- |
+| Metadata Filter Intent | Validated date, speaker-name, unsupported-constraint, and clarification fields extracted from the original question. | Query rewrite | No |
+| Retrieval Filters | Typed constraints containing resolved Hansard talker IDs and optional inclusive date bounds. | Search hint (when mandatory) | No |
+| Speaker Identity (`talker_id`) | Stable identifier for one Hansard talker, resolved from canonical name, first-and-last name, or unique surname. | Speaker name (when referring to the ID) | No |
+| Canberra Calendar Date | Parliamentary local calendar date in `Australia/Canberra`, used to interpret inclusive retrieval bounds. | UTC date | No |
+| Clarification Required | Completion state returned before embedding or retrieval when a requested constraint is unsupported, unclear, unknown, or ambiguous. | Abstention | Yes |
+| Filtered Evidence | Ranked chunks satisfying all active retrieval dimensions before vector and BM25 candidate limits. | Post-filtered results | No |
+
 ## Candidate commands and events terminology
 
 ### Commands

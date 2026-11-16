@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from datetime import date
 from typing import Any
 
 import pytest
 from ollama import ChatResponse, Message
 
+from ddd_policy_tracer.answering.metadata_filter_extraction import MetadataFilterIntent
 from ddd_policy_tracer.answering.ollama_generator import (
     OllamaAnswerGenerator,
     OllamaAnswerGeneratorConfig,
@@ -159,3 +161,36 @@ def test_ollama_generator_produces_an_answer_with_resolved_citations() -> None:
     assert answer.text.startswith("Helen Haines says the bill helps children. [1]")
     assert answer.citations[0].chunk_id == "chunk-haines"
     assert "`282335_2025-02-12_hor_main_16_0_0_7_0`" in answer.text
+
+
+def test_ollama_generator_extracts_filters_with_its_configured_model() -> None:
+    """Use the configured answer provider to return strict date and speaker constraints."""
+    client = StubOllamaClient(
+        json.dumps(
+            {
+                "start_date": "2025-02-01",
+                "end_date": "2025-02-28",
+                "speaker_names": ["Helen Haines"],
+                "unsupported_constraints": [],
+                "clarification_question": None,
+            },
+        ),
+    )
+    generator = OllamaAnswerGenerator(
+        OllamaAnswerGeneratorConfig(model="test-model"),
+        client=client,
+    )
+
+    intent = generator.extract_filters("What did Helen Haines say in February 2025?")
+
+    assert intent == MetadataFilterIntent(
+        start_date=date(2025, 2, 1),
+        end_date=date(2025, 2, 28),
+        speaker_names=("Helen Haines",),
+    )
+    assert client.request is not None
+    assert client.request["model"] == "test-model"
+    assert client.request["options"] == {"temperature": 0.0}
+    request_data = json.loads(client.request["messages"][1]["content"])
+    assert request_data["question"] == "What did Helen Haines say in February 2025?"
+    assert request_data["canberra_today"]

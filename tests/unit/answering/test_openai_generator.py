@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 import httpx
 import pytest
 from openai import OpenAI
 
+from ddd_policy_tracer.answering.metadata_filter_extraction import MetadataFilterIntent
 from ddd_policy_tracer.answering.openai_generator import (
     OpenAIAnswerGenerator,
     OpenAIAnswerGeneratorConfig,
@@ -23,6 +25,7 @@ def _openai_client(
     capture_request: Callable[[dict[str, Any]], None] | None = None,
 ) -> OpenAI:
     """Build an OpenAI client backed by a local HTTP response."""
+
     def respond(request: httpx.Request) -> httpx.Response:
         if capture_request is not None:
             capture_request(json.loads(request.content))
@@ -141,3 +144,43 @@ def test_openai_generator_rejects_malformed_structured_output() -> None:
 
     with pytest.raises(ValueError, match="valid JSON"):
         generator.generate("Question?", [_speech_chunk()])
+
+
+def test_openai_generator_extracts_filters_with_its_configured_model() -> None:
+    """Use the configured answer provider to return strict date and speaker constraints."""
+    request: dict[str, Any] | None = None
+
+    def capture_request(payload: dict[str, Any]) -> None:
+        nonlocal request
+        request = payload
+
+    generator = OpenAIAnswerGenerator(
+        OpenAIAnswerGeneratorConfig(model="test-model"),
+        client=_openai_client(
+            json.dumps(
+                {
+                    "start_date": "2025-02-01",
+                    "end_date": "2025-02-28",
+                    "speaker_names": ["Helen Haines"],
+                    "unsupported_constraints": [],
+                    "clarification_question": None,
+                },
+            ),
+            capture_request,
+        ),
+    )
+
+    intent = generator.extract_filters("What did Helen Haines say in February 2025?")
+
+    assert intent == MetadataFilterIntent(
+        start_date=date(2025, 2, 1),
+        end_date=date(2025, 2, 28),
+        speaker_names=("Helen Haines",),
+    )
+    assert request is not None
+    assert request["model"] == "test-model"
+    assert request["temperature"] == 0
+    assert request["response_format"]["type"] == "json_schema"
+    request_data = json.loads(request["messages"][1]["content"])
+    assert request_data["question"] == "What did Helen Haines say in February 2025?"
+    assert request_data["canberra_today"]

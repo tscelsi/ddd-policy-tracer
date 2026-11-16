@@ -6,14 +6,19 @@ import re
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from threading import Lock
+from zoneinfo import ZoneInfo
 
 import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32
 
+from ddd_policy_tracer.retrieval.service_layer import RetrievalFilters
+
 _RRF_K = 60
 _FTS_TOKEN = re.compile(r"\w+", flags=re.UNICODE)
+_CANBERRA = ZoneInfo("Australia/Canberra")
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,7 @@ class SQLiteHybridRetriever:
         *,
         query_embedding: Sequence[float],
         limit: int = 10,
+        filters: RetrievalFilters | None = None,
     ) -> list[SQLiteChunkResult]:
         """Return nearest chunks using the database's sqlite-vec index."""
         _validate_limit(limit)
@@ -73,8 +79,32 @@ class SQLiteHybridRetriever:
         query_vector = serialize_float32([float(value) for value in query_embedding])
         connection = self._open_database(load_vector_extension=True)
         try:
-            rows = connection.execute(
-                """
+            if filters is not None and filters.has_constraints:
+                filter_sql, filter_parameters = _filter_clause(filters, "chunks")
+                rows = connection.execute(
+                    f"""
+                SELECT chunks.chunk_id,
+                       chunks.source_id,
+                       chunks.source_document_id,
+                       chunks.chunk_index,
+                       chunks.start_char,
+                       chunks.end_char,
+                       chunks.chunk_text,
+                       chunks.topics,
+                       chunks.metadata,
+                       vec_distance_L2(embeddings.embedding, ?) AS distance
+                FROM document_chunks AS chunks
+                JOIN chunk_embeddings AS embeddings
+                  ON embeddings.chunk_id = chunks.chunk_id
+                WHERE {filter_sql}
+                ORDER BY distance
+                LIMIT ?
+                """,  # noqa: S608
+                    (query_vector, *filter_parameters, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
                 SELECT chunks.chunk_id,
                        chunks.source_id,
                        chunks.source_document_id,
@@ -95,23 +125,33 @@ class SQLiteHybridRetriever:
                   ON chunks.chunk_id = nearest.chunk_id
                 ORDER BY nearest.distance
                 """,
-                (query_vector, limit),
-            ).fetchall()
+                    (query_vector, limit),
+                ).fetchall()
         finally:
             connection.close()
 
         return [_chunk_result(row, vector_distance=float(row[9])) for row in rows]
 
-    def search_bm25(self, *, query: str, limit: int = 10) -> list[SQLiteChunkResult]:
+    def search_bm25(
+        self,
+        *,
+        query: str,
+        limit: int = 10,
+        filters: RetrievalFilters | None = None,
+    ) -> list[SQLiteChunkResult]:
         """Return chunks ranked by SQLite FTS5 BM25 over their text."""
         _validate_limit(limit)
         fts_query = _to_fts_query(query)
         if not fts_query:
             return []
+        filter_sql = ""
+        filter_parameters: tuple[object, ...] = ()
+        if filters is not None and filters.has_constraints:
+            filter_sql, filter_parameters = _filter_clause(filters, "chunks_fts")
 
         with self._fts_lock:
             rows = self._fts_connection.execute(
-                """
+                f"""
                 SELECT chunk_id,
                        source_id,
                        source_document_id,
@@ -124,10 +164,11 @@ class SQLiteHybridRetriever:
                        bm25(chunks_fts, 0, 0, 0, 0, 0, 0, 0, 0, 1.0) AS score
                 FROM chunks_fts
                 WHERE chunks_fts MATCH ?
+                  {f"AND {filter_sql}" if filter_sql else ""}
                 ORDER BY score ASC
                 LIMIT ?
-                """,
-                (fts_query, limit),
+                """,  # noqa: S608
+                (fts_query, *filter_parameters, limit),
             ).fetchall()
         return [_chunk_result(row, bm25_score=float(row[9])) for row in rows]
 
@@ -138,14 +179,19 @@ class SQLiteHybridRetriever:
         query_embedding: Sequence[float],
         limit: int = 10,
         candidate_limit: int | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[SQLiteChunkResult]:
         """Combine vector and BM25 rankings using reciprocal-rank fusion."""
         _validate_limit(limit)
         candidates = candidate_limit if candidate_limit is not None else max(30, limit * 3)
         _validate_limit(candidates, name="candidate_limit")
 
-        vector_results = self.search_vector(query_embedding=query_embedding, limit=candidates)
-        lexical_results = self.search_bm25(query=query, limit=candidates)
+        vector_results = self.search_vector(
+            query_embedding=query_embedding,
+            limit=candidates,
+            filters=filters,
+        )
+        lexical_results = self.search_bm25(query=query, limit=candidates, filters=filters)
         merged: dict[str, SQLiteChunkResult] = {}
         scores: dict[str, float] = {}
 
@@ -271,3 +317,48 @@ def _validate_limit(limit: int, *, name: str = "limit") -> None:
     """Reject nonpositive retrieval result limits."""
     if limit <= 0:
         raise ValueError(f"{name} must be greater than zero")
+
+
+def _filter_clause(filters: RetrievalFilters, alias: str) -> tuple[str, tuple[object, ...]]:
+    """Build bound SQL conditions over existing chunk metadata for constrained search."""
+    clauses = [f"{alias}.source_id = 'hansard'"]
+    parameters: list[object] = []
+    if filters.talker_ids:
+        placeholders = ", ".join("?" for _ in filters.talker_ids)
+        talker_id = (
+            f"COALESCE(json_extract({alias}.metadata, '$.doc_metadata.talker_id'), "
+            f"json_extract({alias}.metadata, '$.doc_metadata.talker.id'))"
+        )
+        clauses.append(f"{talker_id} IN ({placeholders})")
+        parameters.extend(filters.talker_ids)
+
+    published_at = (
+        f"NULLIF(COALESCE(json_extract({alias}.metadata, "
+        "'$.doc_metadata.published_at'), json_extract("
+        f"{alias}.metadata, '$.published_at')), '')"
+    )
+    legacy_date = (
+        f"substr({alias}.source_document_id, instr({alias}.source_document_id, '_') + 1, 10)"
+    )
+    for bound, utc_operator, local_operator in (
+        (filters.start_date, ">=", ">="),
+        (filters.end_date, "<", "<="),
+    ):
+        if bound is None:
+            continue
+        utc_bound = datetime.combine(bound, time.min, tzinfo=_CANBERRA)
+        if utc_operator == "<":
+            utc_bound = datetime.combine(bound + timedelta(days=1), time.min, tzinfo=_CANBERRA)
+        utc_bound_text = utc_bound.astimezone(UTC).isoformat()
+        clauses.append(
+            "("
+            f"({published_at} IS NOT NULL AND "
+            f"((length({published_at}) = 10 AND {published_at} {local_operator} ?) "
+            f"OR (length({published_at}) > 10 AND "
+            f"julianday({published_at}) {utc_operator} julianday(?)))) "
+            f"OR ({published_at} IS NULL AND {legacy_date} {local_operator} ?)"
+            ")",
+        )
+        parameters.extend((bound.isoformat(), utc_bound_text, bound.isoformat()))
+
+    return " AND ".join(clauses), tuple(parameters)

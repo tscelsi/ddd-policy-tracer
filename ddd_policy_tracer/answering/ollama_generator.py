@@ -9,6 +9,14 @@ from typing import Any, Protocol
 
 from ollama import ChatResponse, Client
 
+from ddd_policy_tracer.answering.metadata_filter_extraction import (
+    FILTER_EXTRACTION_PROMPT,
+    FILTER_EXTRACTION_SCHEMA,
+    MetadataFilterExtractionError,
+    MetadataFilterIntent,
+    build_filter_request_content,
+    parse_filter_intent,
+)
 from ddd_policy_tracer.answering.service_layer import (
     AnswerDraft,
     EvidenceChunk,
@@ -116,3 +124,26 @@ class OllamaAnswerGenerator:
         if response.message.content is None:
             raise ValueError("Ollama returned an empty answer response")
         return parse_answer_draft(response.message.content, provider="Ollama")
+
+    def extract_filters(self, question: str) -> MetadataFilterIntent:
+        """Extract only supported metadata constraints using the configured Ollama model."""
+        response = self._client.chat(
+            model=self.config.model,
+            messages=[
+                {"role": "system", "content": FILTER_EXTRACTION_PROMPT},
+                {
+                    "role": "user",
+                    "content": build_filter_request_content(question),
+                },
+            ],
+            format=FILTER_EXTRACTION_SCHEMA,
+            options={"temperature": 0.0},
+            stream=False,
+        )
+        if not isinstance(response, ChatResponse):
+            raise MetadataFilterExtractionError(
+                "Ollama client returned a streaming filter response",
+            )
+        if response.message.content is None:
+            raise MetadataFilterExtractionError("Ollama returned an empty metadata filter response")
+        return parse_filter_intent(response.message.content, provider="Ollama")

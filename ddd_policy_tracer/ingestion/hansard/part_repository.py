@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 from pymongo import AsyncMongoClient
 
@@ -77,7 +77,7 @@ class MongoPartRepository(AbstractPartRepository):
 
     def __init__(
         self,
-        mongo_client: AsyncMongoClient,
+        mongo_client: AsyncMongoClient[Any],
         db_name: str = "hansard",
     ) -> None:
         """Initialize the repository with a MongoDB client and database name."""
