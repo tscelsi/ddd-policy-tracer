@@ -8,6 +8,8 @@
 | --- | --- | --- | --- |
 | Analysis Pipeline | The staged workflow that transforms `SourceDocumentVersion` records into chunks, extraction outputs, enrichment metadata, and graph-ready assertions. | Post-processing, NLP pass (as sole term) | No |
 | Document Chunk | A deterministic, version-bound text segment produced from `normalized_text`. | Paragraph (unless true paragraph boundary) | No |
+| Citation | A numbered reference in an answer to retrieved evidence and its provenance; it does not necessarily identify a navigable link. | Source link (unless a URL is provided) | No |
+| Source Excerpt | Supporting passage text from a source document, presented as evidence; it is not the complete speech or source document. | Full speech, transcript | No |
 | Chunk Identity (`chunk_id`) | Stable identifier for one chunk tied to source and document version offsets. | Section ID | No |
 | Document Checksum Binding (`document_checksum`) | The checksum field copied from acquisition versions to ensure downstream records bind to an exact source document version. | Hash only | No |
 | Claim Candidate | A machine-extracted statement from one chunk that may represent a policy-relevant assertion before canonicalization. | Final Claim | Yes (candidate vs canonical must stay explicit) |

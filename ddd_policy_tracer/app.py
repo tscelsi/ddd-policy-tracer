@@ -9,9 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from ddd_policy_tracer.__DEPRECATED_analysis.entities._catalog.router import (
-    router as catalog_router,
-)
 from ddd_policy_tracer.answering.completion_service import RagCompletionService
 from ddd_policy_tracer.answering.ollama_generator import (
     OllamaAnswerGenerator,
@@ -88,7 +85,6 @@ app = FastAPI(
 )
 
 
-app.include_router(catalog_router)
 app.include_router(completion_router, prefix="/api")
 
 
