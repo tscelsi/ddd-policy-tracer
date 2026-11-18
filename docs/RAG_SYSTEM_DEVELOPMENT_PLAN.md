@@ -107,21 +107,32 @@ multiple passages.
 
 An initial 25-case draft is in
 [`tests/fixtures/rag_validation_cases.json`](../tests/fixtures/rag_validation_cases.json).
-It covers the five Phase 0 question families, with 20 answerable cases and five
-cases that should abstain. Its evidence IDs and labels are candidate
-annotations and must be reviewed before reporting evaluation metrics.
+It covers the five Phase 0 question families. Cases remain drafts until a
+reviewer explicitly approves them. This framework measures query-to-evidence
+retrieval only; existing `expected_answer_points` are preserved but are not
+generated, edited, validated, or scored. The local chunk viewer supports
+selecting actual evidence passages, drafting 2–3 grounded query variants with
+the configured answer provider/model, and recording human approval or
+rejection in the fixture. Human-authored unanswerable cases require an explicit
+corpus-absence reason and are reported separately without a pass threshold.
+
+An approved answerable query has one conjunctively required set of gold chunk
+IDs. Every ID must appear in the top 10; extra retrieved chunks are allowed.
+The evaluation reports each target's rank, fails stale IDs missing from the
+indexed corpus for human re-review, and refuses to report an empty answerable
+run.
 
 Record a baseline for hybrid retrieval before changing ranking behavior.
 Measure:
 
-- **Recall@k**: whether relevant evidence appears in the candidate set.
-- **MRR or nDCG@k**: how highly relevant evidence is ranked.
+- **Complete Evidence@10**: whether all required chunks appear in the top 10.
+- **Target ranks**: rank of each required evidence chunk, to support later
+  ranking comparisons without changing the current success condition.
 - **Latency**: retrieval and total response time.
-- Once generation exists: citation precision/support and answer faithfulness,
-  including abstention quality on unanswerable questions.
 
 **Exit criteria:** the evaluation can be run repeatedly and produces comparable
-metrics for the current retriever.
+retrieval results for approved cases; unanswerable-case outcomes remain
+separately reported until a threshold is agreed.
 
 ### Phase 2 — Preserve and filter parliamentary metadata
 

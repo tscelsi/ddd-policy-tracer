@@ -77,6 +77,24 @@ class SQLiteHybridRetriever:
         with self._fts_lock:
             self._fts_connection.close()
 
+    def existing_chunk_ids(self, chunk_ids: Sequence[str]) -> set[str]:
+        """Return annotated chunk IDs that still exist in the indexed corpus."""
+        if not chunk_ids:
+            return set()
+        connection = self._open_database(load_vector_extension=False)
+        try:
+            rows = connection.execute(
+                """
+                SELECT chunk_id
+                FROM document_chunks
+                WHERE chunk_id IN (SELECT value FROM json_each(?))
+                """,
+                (json.dumps(list(chunk_ids)),),
+            ).fetchall()
+        finally:
+            connection.close()
+        return {str(row[0]) for row in rows}
+
     def search_vector(
         self,
         *,

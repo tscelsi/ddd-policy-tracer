@@ -20,6 +20,9 @@
 | Hybrid Retrieval | Retrieval approach combining vector similarity over chunks with graph traversal for relationship reasoning. | RAG (as sole term) | Yes |
 | Chunk Embedding | Numeric vector representation attached to a `DocumentChunk` so semantic retrieval can compare text similarity. | embedding vector, vector representation | No |
 | Graph Store | Port abstraction for persisting document/chunk graph nodes and querying similarity over embeddings. | database layer, graph DB | No |
+| Gold Evidence Chunk IDs | Human-reviewed chunk IDs that must all occur in an approved answerable query's top-ten results; extra results are permitted. | Alternative evidence, substitute evidence | No |
+| Retrieval Evaluation Case | A query paired with answerability, conjunctive gold evidence IDs when answerable, and `draft`, `approved`, or `rejected` review status. | Answer evaluation example | No |
+| Confirmed Unanswerable Case | A human-authored or reviewed query with an explicit indexed-corpus absence reason, reported separately without a pass threshold. | Evidence-free success | No |
 
 ### Supporting terms
 

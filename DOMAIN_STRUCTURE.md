@@ -29,12 +29,14 @@
 
 ### Retrieval (new, minimal v1)
 - Responsibility: Ingest `SourceDocument` and `DocumentChunk` records into a graph database and answer similarity queries using chunk embedding vectors.
-- Owns language: Graph Store, Chunk Embedding, Retrieval Query, Similarity Score, SourceDocument node, DocumentChunk node.
+- Owns language: Graph Store, Chunk Embedding, Retrieval Query, Similarity Score, SourceDocument node, DocumentChunk node, Retrieval Evaluation Case, Gold Evidence Chunk IDs.
 - Does not own: extraction, canonicalization, or policy judgment beyond ranking matched chunks.
 - Integrations:
   - Upstream from Document Acquisition and Analysis chunk persistence.
   - Persistence adapter: FalkorDB graph instance for node/edge storage.
   - Retrieval operations: cosine-similarity ranking over `chunk.embeddings`.
+  - Operator workflow: select persisted chunks in the local terminal viewer, review grounded query variants, and explicitly approve cases in the shared JSON fixture.
+  - Evaluation: only approved answerable cases count; every gold chunk ID must rank in the top ten. Approved unanswerable cases are reported separately without a pass threshold.
 
 ## Context map (draft)
 

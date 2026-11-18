@@ -201,6 +201,17 @@ def test_vector_search_returns_nearest_chunk_and_provenance(tmp_path: Path) -> N
     assert lexical_results[0].talker_id == "talker-1"
 
 
+def test_existing_chunk_ids_reports_only_ids_in_the_corpus(tmp_path: Path) -> None:
+    """Distinguish stale evidence annotations from retrieval ranking misses."""
+    database_path = tmp_path / "retrieval.db"
+    _create_database(database_path)
+
+    with SQLiteHybridRetriever(database_path) as retriever:
+        existing_ids = retriever.existing_chunk_ids(["chunk-vector", "deleted-chunk"])
+
+    assert existing_ids == {"chunk-vector"}
+
+
 def test_bm25_search_ranks_matching_chunk_and_quotes_query_terms(tmp_path: Path) -> None:
     """Rank exact lexical matches without treating user text as FTS syntax."""
     database_path = tmp_path / "retrieval.db"

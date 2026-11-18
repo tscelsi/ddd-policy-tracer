@@ -25,6 +25,11 @@ from ddd_policy_tracer.answering.openai_generator import (
     OpenAIAnswerGenerator,
     OpenAIAnswerGeneratorConfig,
 )
+from ddd_policy_tracer.answering.query_variants import (
+    OllamaQueryVariantDrafter,
+    OpenAIQueryVariantDrafter,
+    QueryVariantDrafter,
+)
 from ddd_policy_tracer.answering.service_layer import AnswerGenerator, AnswerSynthesizer
 from ddd_policy_tracer.api.completion import router as completion_router
 from ddd_policy_tracer.enrichment.chunking.adapters import SQLiteDocumentChunkRepository
@@ -60,6 +65,21 @@ def create_answer_generator() -> AnswerGenerator:
             OpenAIAnswerGeneratorConfig(
                 model=os.environ.get("OPENAI_MODEL", "gpt-6-luna"),
             ),
+        )
+    raise ValueError("RAG_ANSWER_GENERATOR must be either 'ollama' or 'openai'")
+
+
+def create_query_variant_drafter() -> QueryVariantDrafter:
+    """Build the query-review drafter with the application's configured provider and model."""
+    provider = os.environ.get("RAG_ANSWER_GENERATOR", "ollama").strip().lower()
+    if provider == "ollama":
+        return OllamaQueryVariantDrafter(
+            model=os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
+            host=os.environ.get("OLLAMA_HOST"),
+        )
+    if provider == "openai":
+        return OpenAIQueryVariantDrafter(
+            model=os.environ.get("OPENAI_MODEL", "gpt-6-luna"),
         )
     raise ValueError("RAG_ANSWER_GENERATOR must be either 'ollama' or 'openai'")
 

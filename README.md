@@ -61,6 +61,12 @@ in `.env` or the process environment. Ollama remains the default provider.
 The OpenAI SDK sends requests to OpenAI using that API key; do not commit the
 key to the repository.
 
+### Reviewing retrieval evaluation cases
+
+See the complete [retrieval evaluation case guide](docs/RETRIEVAL_EVALUATION_CASES.md)
+for generating query variants, reviewing and approving cases, adding confirmed
+unanswerable examples, and running the evaluation.
+
 ### Profiling completion requests
 
 Each successful `POST /api/completion` response includes a `Server-Timing`

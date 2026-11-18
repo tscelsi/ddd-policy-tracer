@@ -6,7 +6,11 @@ import pytest
 
 from ddd_policy_tracer.answering.ollama_generator import OllamaAnswerGenerator
 from ddd_policy_tracer.answering.openai_generator import OpenAIAnswerGenerator
-from ddd_policy_tracer.app import create_answer_generator
+from ddd_policy_tracer.answering.query_variants import (
+    OllamaQueryVariantDrafter,
+    OpenAIQueryVariantDrafter,
+)
+from ddd_policy_tracer.app import create_answer_generator, create_query_variant_drafter
 
 
 def test_ollama_remains_the_default_answer_generator(
@@ -42,3 +46,31 @@ def test_unknown_answer_generator_configuration_is_rejected(
 
     with pytest.raises(ValueError, match="RAG_ANSWER_GENERATOR"):
         create_answer_generator()
+
+
+def test_query_drafter_uses_the_configured_ollama_answer_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep local query drafting on the application's configured provider and model."""
+    monkeypatch.setenv("RAG_ANSWER_GENERATOR", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "review-model")
+    monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+
+    drafter = create_query_variant_drafter()
+
+    assert isinstance(drafter, OllamaQueryVariantDrafter)
+    assert drafter.model == "review-model"
+
+
+def test_query_drafter_uses_the_configured_openai_answer_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the same OpenAI model selection as answer generation."""
+    monkeypatch.setenv("RAG_ANSWER_GENERATOR", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "review-model")
+
+    drafter = create_query_variant_drafter()
+
+    assert isinstance(drafter, OpenAIQueryVariantDrafter)
+    assert drafter.model == "review-model"

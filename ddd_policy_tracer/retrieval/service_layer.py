@@ -63,6 +63,14 @@ class HybridChunkRetriever(Protocol):
         ...
 
 
+class ChunkIdentityIndex(Protocol):
+    """Port for checking whether annotated evidence IDs remain indexed."""
+
+    def existing_chunk_ids(self, chunk_ids: Sequence[str]) -> set[str]:
+        """Return the requested IDs that exist in the evidence corpus."""
+        ...
+
+
 def retrieve_evidence_chunks(
     *,
     query: str,

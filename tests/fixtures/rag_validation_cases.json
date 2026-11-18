@@ -4,9 +4,10 @@
   "source_database": "data/new4.db",
   "corpus_coverage": "The inspected database contains Hansard chunks dated in 2025 only.",
   "annotation_notes": [
-    "Gold chunk IDs are candidate supporting evidence, not an adjudicated exhaustive relevance set.",
-    "Review every question, answerability label, answer point, and evidence reference before using the cases for reported metrics.",
-    "For comparison and chronology cases, all listed chunks are intended to be retrieved to support the requested synthesis.",
+    "All cases are drafts until a human explicitly approves them; only approved cases enter retrieval evaluation.",
+    "Gold chunk IDs are conjunctively required: every listed ID must occur in the top 10, while extra retrieved chunks are allowed.",
+    "Review every question, answerability label, corpus-absence reason, and evidence reference before reporting retrieval metrics.",
+    "expected_answer_points are preserved for other workflows but are outside the scope of this retrieval evaluation.",
     "The database stores speaker and topic data in chunk metadata; date, house, and chamber are encoded in source_document_id rather than explicit filter columns."
   ],
   "cases": [
