@@ -8,11 +8,8 @@ import sqlite3
 from pathlib import Path
 from typing import Protocol
 
-from ddd_policy_tracer.__DEPRECATED_analysis.entities._catalog.adapters import (
-    deserialize_f32,
-    serialize_f32,
-)
 from ddd_policy_tracer.utils.db_manager import DbManager
+from ddd_policy_tracer.utils.serialization import deserialize_f32, serialize_f32
 
 from .models import DocumentChunk
 

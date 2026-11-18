@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Lock
 
 import sqlite_vec  # type: ignore[import-untyped]
-from sqlite_vec import serialize_float32
+from sqlite_vec import serialize_float32  # type: ignore[import-untyped]
 
 from ddd_policy_tracer.retrieval.metadata_filters import (
     MetadataFilter,

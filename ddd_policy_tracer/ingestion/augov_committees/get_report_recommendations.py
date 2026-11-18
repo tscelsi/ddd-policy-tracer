@@ -1,8 +1,8 @@
 import httpx
 from bs4 import BeautifulSoup
 
-from ddd_policy_tracer.__DEPRECATED_analysis.enrichment.chunks.chunking import _build_chunk_id
-from ddd_policy_tracer.__DEPRECATED_analysis.enrichment.chunks.models import DocumentChunk
+from ddd_policy_tracer.enrichment.chunking.chunking import build_chunk_id
+from ddd_policy_tracer.enrichment.chunking.models import DocumentChunk
 from ddd_policy_tracer.ingestion.domain import compute_checksum
 
 url = "https://www.aph.gov.au/Parliamentary_Business/Committees/Senate/Environment_and_Communications/CRA48P/Report/List_of_recommendations"
@@ -29,7 +29,7 @@ def get_report_recommendations(url: str) -> list[DocumentChunk]:
     checksum = compute_checksum("".join(recommendations).encode("utf-8"))
     for i, rec in enumerate(recommendations):
         chunk = DocumentChunk(
-            chunk_id=_build_chunk_id(
+            chunk_id=build_chunk_id(
                 source_id=source_id,
                 source_document_id=source_document_id,
                 checksum=checksum,

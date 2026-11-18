@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from ddd_policy_tracer.__DEPRECATED_analysis import ChunkingConfig
 from ddd_policy_tracer.enrichment.chunking.chunking import MarkdownChunker, SpacyChunker
+from ddd_policy_tracer.enrichment.chunking.models import ChunkingConfig
 from ddd_policy_tracer.ingestion.domain import SourceDocument
 
 

@@ -118,7 +118,7 @@ class SpacyChunker(Chunker):
             start_char = sentences[start_sentence_index].start_char
             end_char = sentences[end_sentence_index - 1].end_char
             chunk_text = normalized_text[start_char:end_char]
-            chunk_id = _build_chunk_id(
+            chunk_id = build_chunk_id(
                 source_id=doc.source_id,
                 source_document_id=doc.source_document_id,
                 checksum=doc.checksum,
@@ -198,7 +198,7 @@ class MarkdownChunker(Chunker):
                         continue
                     elif sent.end_char - curr_span.start_char >= rough_char_split_size:
                         end_char = start_char + curr_span.end_char
-                        chunk_id = _build_chunk_id(
+                        chunk_id = build_chunk_id(
                             source_id=doc.source_id,
                             source_document_id=doc.source_document_id,
                             checksum=doc.checksum,
@@ -229,7 +229,7 @@ class MarkdownChunker(Chunker):
                         )
                 if curr_span is not None and curr_span.text.strip():
                     end_char = start_char + curr_span.end_char
-                    chunk_id = _build_chunk_id(
+                    chunk_id = build_chunk_id(
                         source_id=doc.source_id,
                         source_document_id=doc.source_document_id,
                         checksum=doc.checksum,
@@ -254,7 +254,7 @@ class MarkdownChunker(Chunker):
                 continue
             else:
                 end_char = start_char + len(chunk.page_content)
-                chunk_id = _build_chunk_id(
+                chunk_id = build_chunk_id(
                     source_id=doc.source_id,
                     source_document_id=doc.source_document_id,
                     checksum=doc.checksum,
@@ -317,7 +317,7 @@ class SemanticChunker(Chunker):
         for i in range(0, len(sents), _min_sentences_in_chunk):
             end_i = min(i + _min_sentences_in_chunk - 1, len(sents) - 1)
             doc_chunk = DocumentChunk(
-                chunk_id=_build_chunk_id(
+                chunk_id=build_chunk_id(
                     source_id=doc.source_id,
                     source_document_id=doc.source_document_id,
                     checksum=doc.checksum,
@@ -506,7 +506,7 @@ def _validate_chunking_config(config: ChunkingConfig) -> None:
         )
 
 
-def _build_chunk_id(
+def build_chunk_id(
     *,
     source_id: str,
     source_document_id: str,

@@ -17,9 +17,9 @@ def _sample_chunk(*, document_checksum: str = "checksum-1", text_length: int = 1
 
 def test_filter_by_length_layer() -> None:
     """Verify that the FilterByLengthLayer correctly filters chunks by length."""
-    from ddd_policy_tracer.enrichment.pipeline.layers import FilterByLengthLayer
+    from ddd_policy_tracer.enrichment.pipeline.layers import Filter
 
-    layer = FilterByLengthLayer(min_length=5, max_length=10)
+    layer = Filter(condition=lambda chunk: 5 <= len(chunk.chunk_text) <= 10)
     too_small_chunk = _sample_chunk(text_length=4)  # Should be filtered out (length 4)
     too_large_chunk = _sample_chunk(text_length=11)  # Should be filtered out (length 11)
     valid_chunk = _sample_chunk(text_length=10)  # Should
@@ -28,11 +28,11 @@ def test_filter_by_length_layer() -> None:
 
 async def test_pipeline_runs() -> None:
     """Verify that the Pipeline correctly runs multiple layers in sequence."""
-    from ddd_policy_tracer.enrichment.pipeline.layers import FilterByLengthLayer
+    from ddd_policy_tracer.enrichment.pipeline.layers import Filter
     from ddd_policy_tracer.enrichment.pipeline.pipeline_base import Pipeline
 
-    layer1 = FilterByLengthLayer(min_length=5, max_length=10)
-    layer2 = FilterByLengthLayer(min_length=8, max_length=12)
+    layer1 = Filter(condition=lambda chunk: 5 <= len(chunk.chunk_text) <= 10)
+    layer2 = Filter(condition=lambda chunk: 8 <= len(chunk.chunk_text) <= 12)
     pipeline = Pipeline(layers=[layer1, layer2])
 
     chunk1 = _sample_chunk(text_length=4)  # Filtered out by layer1

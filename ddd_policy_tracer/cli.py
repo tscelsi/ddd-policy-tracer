@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TextIO
 
-from .__DEPRECATED_analysis.cli import run_cli as run_analysis_cli
 from .ingestion.cli import run_cli as run_discovery_cli
 
 
@@ -23,7 +22,5 @@ def run_cli(
     command = args[0]
     if command == "acquire":
         return run_discovery_cli(args, stdout=stdout, fetch=fetch)
-    if command in {"chunk", "entities-catalog", "entities-review"}:
-        return run_analysis_cli(args, stdout=stdout)
 
     return run_discovery_cli(args, stdout=stdout, fetch=fetch)
