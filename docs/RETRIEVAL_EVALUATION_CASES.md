@@ -155,14 +155,28 @@ Only approved answerable cases are evaluated. The retriever must find every
 required chunk within the top 10. The report lists each target's rank; a
 missing chunk ID is reported as stale and fails the case, requiring human
 re-review. Stale IDs are never silently remapped or skipped. The evaluation
-also reports approved unanswerable cases separately.
+also reports approved unanswerable cases separately. Cases are retrieved
+through `RagCompletionService.retrieve`, including the configured LLM metadata
+filtering and speaker resolution used by normal RAG queries.
 
-The model-backed integration test uses `data/new4.db` and is opt-in:
+Run the evaluation script against `data/new4.db`:
 
 ```bash
-RUN_RAG_VALIDATION=1 uv run pytest \
-  tests/integration/test_rag_validation.py -s
+uv run python scripts/evaluate_rag_retrieval.py
 ```
+
+> **Warning:** Running this evaluation calls the configured LLM for metadata
+> filtering on every case. Hosted providers may incur usage fees.
+
+Each run appends one JSON record per evaluated case to
+`logs/rag_validation.log`, including the retrieved chunk IDs, ranks, passage
+text, source metadata, and any retrieval error. Set `RAG_VALIDATION_LOG_PATH`
+to write the log to a different location. The `logs/` directory is ignored by
+Git. `--database`, `--fixture`, and `--log-file` can override the default paths.
+
+An exception while retrieving one case is recorded as a failure and does not
+stop later cases from running. The script exits with a non-zero status if any
+answerable case fails, including cases with retrieval errors.
 
 The run fails if there are no approved answerable cases, so approve at least
 one valid answerable case before running it. Make sure the indexed database

@@ -215,7 +215,7 @@ def test_completion_maps_openai_connection_errors_to_service_unavailable() -> No
     class UnavailableCompletionService(RagCompletionService):
         """Raise the provider failure surfaced by the OpenAI SDK."""
 
-        async def complete(self, question: str, *, limit: int = 10) -> CompletionRun:
+        async def completion(self, question: str, *, limit: int = 10) -> CompletionRun:
             """Raise a connection error without making a network request."""
             raise APIConnectionError(
                 request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),

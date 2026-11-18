@@ -3,13 +3,28 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 
 import pytest
 
+from ddd_policy_tracer.answering.completion_service import (
+    RagCompletionService,
+    UnsupportedFilterError,
+)
+from ddd_policy_tracer.answering.service_layer import (
+    AnswerDraft,
+    AnswerSynthesizer,
+    EvidenceChunk,
+)
 from ddd_policy_tracer.retrieval.evaluation import (
     evaluate_cases,
     transition_review_status,
     validate_case,
+)
+from ddd_policy_tracer.retrieval.metadata_filters import (
+    MetadataFilter,
+    MetadataFilterExtraction,
+    SpeakerResolution,
 )
 
 
@@ -56,7 +71,7 @@ class FakeRetriever:
         query_embedding: Sequence[float],
         limit: int = 10,
         candidate_limit: int | None = None,
-        filters: object | None = None,
+        filters: MetadataFilter | None = None,
     ) -> list[FakeChunk]:
         """Return the configured top-k chunk results."""
         return [FakeChunk(chunk_id) for chunk_id in self.ranked_ids[:limit]]
@@ -64,6 +79,61 @@ class FakeRetriever:
     def existing_chunk_ids(self, chunk_ids: Sequence[str]) -> set[str]:
         """Return the requested IDs that remain in the fake corpus."""
         return set(chunk_ids) & self.corpus_ids
+
+
+class FakeMetadataFilterExtractor:
+    """Return no filters while tracking metadata extraction calls."""
+
+    def __init__(self, fail_on_question: str | None = None) -> None:
+        """Start the extraction count at zero."""
+        self.call_count = 0
+        self.fail_on_question = fail_on_question
+
+    def extract(
+        self,
+        question: str,
+        *,
+        reference_date: date,
+    ) -> MetadataFilterExtraction:
+        """Return an empty filter result for deterministic evaluation tests."""
+        self.call_count += 1
+        if question == self.fail_on_question:
+            raise UnsupportedFilterError("Unsupported date constraint")
+        return MetadataFilterExtraction()
+
+
+class FakeSpeakerResolver:
+    """Resolve no requested speaker names for evaluation tests."""
+
+    async def resolve(self, speaker_names: Sequence[str]) -> SpeakerResolution:
+        """Return an empty resolution when no speaker filter is requested."""
+        return SpeakerResolution()
+
+
+class FakeAnswerGenerator:
+    """Provide an unused answer generator required by the completion service."""
+
+    def generate(self, question: str, evidence: Sequence[EvidenceChunk]) -> AnswerDraft:
+        """Return an empty draft; evaluation only exercises retrieval."""
+        return AnswerDraft()
+
+
+def build_completion_service(
+    retriever: FakeRetriever,
+    metadata_filter_extractor: FakeMetadataFilterExtractor | None = None,
+) -> tuple[RagCompletionService, FakeMetadataFilterExtractor]:
+    """Wire fake retrieval and metadata ports through the production completion service."""
+    extractor = metadata_filter_extractor or FakeMetadataFilterExtractor()
+    return (
+        RagCompletionService(
+            retriever=retriever,
+            embedding_service=FakeEmbedder(),
+            synthesizer=AnswerSynthesizer(FakeAnswerGenerator()),
+            metadata_filter_extractor=extractor,
+            speaker_name_resolver=FakeSpeakerResolver(),
+        ),
+        extractor,
+    )
 
 
 def answerable_case(**overrides: object) -> dict[str, object]:
@@ -135,38 +205,88 @@ def test_rejected_case_requires_reason() -> None:
         )
 
 
-def test_evaluation_requires_approved_answerable_cases() -> None:
+async def test_evaluation_requires_approved_answerable_cases() -> None:
     """Never report an empty evaluation as a successful run."""
+    retriever = FakeRetriever([])
+    completion_service, _ = build_completion_service(retriever)
     with pytest.raises(ValueError, match="approved answerable"):
-        evaluate_cases(
+        await evaluate_cases(
             [answerable_case(review_status="draft")],
-            retriever=FakeRetriever([]),
-            chunk_index=FakeRetriever([]),
-            embedding_service=FakeEmbedder(),
+            completion_service=completion_service,
+            chunk_index=retriever,
         )
 
 
-def test_evaluation_requires_all_gold_evidence_and_reports_ranks() -> None:
-    """Pass only when every required chunk is in the top ten; extras are allowed."""
-    result = evaluate_cases(
+async def test_evaluation_uses_completion_retrieval_and_reports_ranks() -> None:
+    """Evaluate the same metadata-filtered ranked chunks used by RAG completion."""
+    retriever = FakeRetriever(["extra", "chunk-b", "chunk-a"])
+    completion_service, extractor = build_completion_service(retriever)
+    result = await evaluate_cases(
         [answerable_case()],
-        retriever=FakeRetriever(["extra", "chunk-b", "chunk-a"]),
-        chunk_index=FakeRetriever(["extra", "chunk-b", "chunk-a"]),
-        embedding_service=FakeEmbedder(),
+        completion_service=completion_service,
+        chunk_index=retriever,
     )
 
+    assert extractor.call_count == 1
     assert result.answerable_passed == 1
     assert result.answerable_total == 1
     assert result.cases[0].target_ranks == {"chunk-a": 3, "chunk-b": 2}
+    assert [
+        (
+            chunk.rank,
+            chunk.chunk_id,
+            chunk.chunk_text,
+            chunk.source_document_id,
+            chunk.metadata,
+        )
+        for chunk in result.cases[0].retrieved_chunks
+    ] == [
+        (1, "extra", "evidence", "speech", None),
+        (2, "chunk-b", "evidence", "speech", None),
+        (3, "chunk-a", "evidence", "speech", None),
+    ]
 
 
-def test_evaluation_fails_for_stale_gold_ids_without_remapping() -> None:
+async def test_evaluation_records_retrieval_errors_and_continues_to_next_case() -> None:
+    """Mark a query failed when retrieval raises and continue evaluating later queries."""
+    retriever = FakeRetriever(["chunk-a", "chunk-b"])
+    extractor = FakeMetadataFilterExtractor(fail_on_question="Unsupported filter request")
+    completion_service, _ = build_completion_service(retriever, extractor)
+    cases = [
+        answerable_case(
+            case_id="unsupported-case",
+            question="Unsupported filter request",
+            gold_evidence_chunk_ids=["chunk-a"],
+        ),
+        answerable_case(
+            case_id="following-case",
+            question="What does the speaker say?",
+            gold_evidence_chunk_ids=["chunk-b"],
+        ),
+    ]
+
+    report = await evaluate_cases(
+        cases,
+        completion_service=completion_service,
+        chunk_index=retriever,
+    )
+
+    assert report.answerable_total == 2
+    assert report.answerable_failed == 1
+    assert report.cases[0].error == "UnsupportedFilterError: Unsupported date constraint"
+    assert report.cases[0].target_ranks == {"chunk-a": None}
+    assert report.cases[1].passed
+    assert report.cases[1].target_ranks == {"chunk-b": 2}
+
+
+async def test_evaluation_fails_for_stale_gold_ids_without_remapping() -> None:
     """Report annotated IDs absent from the corpus as stale and fail the case."""
-    result = evaluate_cases(
+    retriever = FakeRetriever(["replacement"], corpus_ids={"chunk-a"})
+    completion_service, _ = build_completion_service(retriever)
+    result = await evaluate_cases(
         [answerable_case()],
-        retriever=FakeRetriever(["replacement"]),
-        chunk_index=FakeRetriever(["replacement"], corpus_ids={"chunk-a"}),
-        embedding_service=FakeEmbedder(),
+        completion_service=completion_service,
+        chunk_index=retriever,
     )
 
     assert result.answerable_failed == 1
@@ -174,9 +294,9 @@ def test_evaluation_fails_for_stale_gold_ids_without_remapping() -> None:
     assert result.cases[0].target_ranks == {"chunk-a": None, "chunk-b": None}
 
 
-def test_approved_unanswerable_cases_are_reported_separately() -> None:
+async def test_approved_unanswerable_cases_are_reported_separately() -> None:
     """Report human-confirmed corpus-absence cases without applying a threshold."""
-    case = {
+    case: dict[str, object] = {
         "case_id": "not-in-corpus",
         "question": "What happened?",
         "answerable": False,
@@ -187,11 +307,12 @@ def test_approved_unanswerable_cases_are_reported_separately() -> None:
         "review_provenance": {"reviewer": "analyst", "status": "approved"},
     }
 
-    result = evaluate_cases(
+    retriever = FakeRetriever(["chunk-a", "chunk-b"])
+    completion_service, _ = build_completion_service(retriever)
+    result = await evaluate_cases(
         [answerable_case(), case],
-        retriever=FakeRetriever(["chunk-a", "chunk-b"]),
-        chunk_index=FakeRetriever(["chunk-a", "chunk-b"]),
-        embedding_service=FakeEmbedder(),
+        completion_service=completion_service,
+        chunk_index=retriever,
     )
 
     assert result.unanswerable_case_ids == ("not-in-corpus",)

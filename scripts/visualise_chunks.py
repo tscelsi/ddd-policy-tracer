@@ -53,8 +53,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--chunks-path",
         type=Path,
-        default=Path("data/chunks_spacy.jsonl"),
-        help="Path to chunk JSONL file.",
+        default=Path("data/db.sqlite"),
+        help="Path to chunk SQLite file.",
     )
     parser.add_argument(
         "--source-id",
@@ -122,6 +122,35 @@ def load_chunks(path: Path) -> list[ChunkRow]:
                 ) from exc
 
             rows.append(_row_from_payload(payload))
+
+    return rows
+
+
+def load_chunks_from_sqlite(path: Path) -> list[ChunkRow]:
+    """Load chunk rows from one JSONL file."""
+    if not path.exists():
+        raise FileNotFoundError(f"Chunks file not found: {path}")
+
+    rows: list[ChunkRow] = []
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT chunk_id, source_id, source_document_id, chunk_index, start_char, end_char, chunk_text, metadata FROM document_chunks",
+    )
+    for row in cursor.fetchall():
+        payload = {
+            "chunk_id": row[0],
+            "source_id": row[1],
+            "source_document_id": row[2],
+            "chunk_index": row[3],
+            "start_char": row[4],
+            "end_char": row[5],
+            "chunk_text": row[6],
+            "metadata": row[7],
+        }
+        rows.append(_row_from_payload(payload))
 
     return rows
 
@@ -461,7 +490,7 @@ def run(argv: list[str]) -> int:
     """Run the interactive chunk visualizer CLI."""
     args = parse_args(argv)
     try:
-        rows = load_chunks(args.chunks_path)
+        rows = load_chunks_from_sqlite(args.chunks_path)
     except (FileNotFoundError, ValueError, KeyError, TypeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

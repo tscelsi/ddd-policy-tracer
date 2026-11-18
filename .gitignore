@@ -15,6 +15,7 @@ wheels/
 !.env.example
 
 data/
+/logs/
 
 .opencode
 
@@ -22,4 +23,4 @@ data/
 
 *.json
 *.jsonl
-!tests/fixtures/rag_validation_cases.json
+!scripts/*.json

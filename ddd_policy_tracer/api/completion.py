@@ -112,7 +112,7 @@ async def create_completion(
     """Retrieve speech evidence and return an answer with source-backed citations."""
     request_started = perf_counter()
     try:
-        run = await completion_service.complete(payload.question, limit=payload.limit)
+        run = await completion_service.completion(payload.question, limit=payload.limit)
     except MetadataFilterExtractionError as exc:
         logger.exception("Metadata filter extraction returned an invalid response")
         raise HTTPException(
@@ -133,23 +133,9 @@ async def create_completion(
         ) from exc
     completion_response = CompletionResponse.from_run(run)
     total_ms = (perf_counter() - request_started) * 1000
-    timings = run.timings
-    response.headers["Server-Timing"] = ", ".join(
-        (
-            f"metadata_filter;dur={timings.metadata_filter_ms:.3f}",
-            f"embedding;dur={timings.embedding_ms:.3f}",
-            f"hybrid_retrieval;dur={timings.hybrid_retrieval_ms:.3f}",
-            f"generation;dur={timings.generation_ms:.3f}",
-            f"completion;dur={total_ms:.3f}",
-        ),
-    )
     logger.info(
         "completion_timing",
         extra={
-            "metadata_filter_ms": timings.metadata_filter_ms,
-            "embedding_ms": timings.embedding_ms,
-            "hybrid_retrieval_ms": timings.hybrid_retrieval_ms,
-            "generation_ms": timings.generation_ms,
             "completion_ms": total_ms,
             "evidence_count": run.evidence_count,
             "abstained": run.answer.abstained if run.answer is not None else False,

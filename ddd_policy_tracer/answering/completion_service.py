@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from time import perf_counter
 from zoneinfo import ZoneInfo
 
 from ddd_policy_tracer.answering.service_layer import AnswerSynthesizer, SynthesizedAnswer
@@ -17,20 +17,26 @@ from ddd_policy_tracer.retrieval.metadata_filters import (
 from ddd_policy_tracer.retrieval.service_layer import (
     HybridChunkRetriever,
     QueryEmbedder,
+    RetrievedChunk,
     embed_query,
 )
+from ddd_policy_tracer.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 _CANBERRA = ZoneInfo("Australia/Canberra")
 
 
-@dataclass(frozen=True)
-class CompletionTimings:
-    """Measure metadata extraction, embedding, retrieval, and synthesis stages."""
+class UnsupportedFilterError(ValueError):
+    """Raise when a user-specified filter cannot be applied to the Hansard corpus."""
 
-    metadata_filter_ms: float
-    embedding_ms: float
-    hybrid_retrieval_ms: float
-    generation_ms: float
+    pass
+
+
+class ClarificationRequiredError(ValueError):
+    """Raise when a user-specified filter cannot be resolved without clarification."""
+
+    pass
 
 
 @dataclass(frozen=True)
@@ -38,7 +44,6 @@ class CompletionRun:
     """Return a synthesized answer or a clarification with stage timings."""
 
     answer: SynthesizedAnswer | None
-    timings: CompletionTimings
     evidence_count: int
     clarification_question: str | None = None
 
@@ -67,36 +72,36 @@ class RagCompletionService:
         self._metadata_filter_extractor = metadata_filter_extractor
         self._speaker_name_resolver = speaker_name_resolver
 
-    async def complete(self, question: str, *, limit: int = 10) -> CompletionRun:
-        """Extract constraints, clarify unresolved intent, and answer from filtered evidence."""
-        stage_started = perf_counter()
+    async def retrieve(
+        self,
+        question: str,
+        *,
+        limit: int = 10,
+    ) -> Sequence[RetrievedChunk]:
+        """Return the metadata filter and ranked evidence for a question."""
         reference_date = datetime.now(_CANBERRA).date()
+        # Extract metadata constraints from the question, or raise if clarification is needed.
+        logger.info(f"Extracting metadata filters for query '{question}'")
         extraction = await asyncio.to_thread(
             self._metadata_filter_extractor.extract,
             question,
             reference_date=reference_date,
         )
         if extraction.clarification_question is not None:
-            return self._clarification_run(
-                extraction.clarification_question,
-                metadata_filter_ms=(perf_counter() - stage_started) * 1000,
-            )
+            raise ClarificationRequiredError(extraction.clarification_question)
         if extraction.unsupported_filters:
             unsupported = ", ".join(extraction.unsupported_filters)
-            return self._clarification_run(
+            raise UnsupportedFilterError(
                 "I can currently narrow Hansard searches by speaker and date, "
                 f"but not by {unsupported}. Could you rephrase your request?",
-                metadata_filter_ms=(perf_counter() - stage_started) * 1000,
             )
-
+        # Resolve speaker names to talker IDs for filtering, or raise if clarification is needed.
+        logger.info(f"Resolving speaker names for query '{question}': {extraction.speaker_names}")
         speaker_resolution = await self._speaker_name_resolver.resolve(
             extraction.speaker_names,
         )
         if speaker_resolution.clarification_question is not None:
-            return self._clarification_run(
-                speaker_resolution.clarification_question,
-                metadata_filter_ms=(perf_counter() - stage_started) * 1000,
-            )
+            raise ClarificationRequiredError(speaker_resolution.clarification_question)
         if extraction.speaker_names and not speaker_resolution.talker_ids:
             raise RuntimeError(
                 "Speaker resolver returned no IDs or clarification for requested names.",
@@ -106,17 +111,14 @@ class RagCompletionService:
             date_from=extraction.date_from,
             date_to=extraction.date_to,
         )
-        metadata_filter_ms = (perf_counter() - stage_started) * 1000
-
-        stage_started = perf_counter()
+        logger.info(f"Metadata filters extracted for query '{question}': {filters}")
         query_embedding = await asyncio.to_thread(
             embed_query,
             question,
             embedding_service=self._embedding_service,
         )
-        embedding_ms = (perf_counter() - stage_started) * 1000
-
-        stage_started = perf_counter()
+        logger.info("Query embedding generated")
+        logger.info(f"Searching hybrid evidence for query '{question}'")
         evidence = await asyncio.to_thread(
             self._retriever.search_hybrid,
             query=question,
@@ -124,42 +126,36 @@ class RagCompletionService:
             limit=limit,
             filters=filters,
         )
-        hybrid_retrieval_ms = (perf_counter() - stage_started) * 1000
+        logger.info(f"Retrieved {len(evidence)} evidence passages")
+        logger.debug(f"Evidence passages: {evidence}")
+        return evidence
 
-        stage_started = perf_counter()
+    async def completion(self, question: str, *, limit: int = 10) -> CompletionRun:
+        """Extract constraints, clarify unresolved intent, and answer from filtered evidence."""
+        logger.info(f"Generating completion for query '{question}'")
+        try:
+            evidence = await self.retrieve(question, limit=limit)
+        except (ClarificationRequiredError, UnsupportedFilterError) as exc:
+            return self._clarification_run(
+                str(exc),
+            )
+        logger.info(f"Retrieved {len(evidence)} evidence passages for query '{question}'")
         answer = await asyncio.to_thread(
             self._synthesizer.synthesize,
             question=question,
             evidence=evidence,
         )
-        generation_ms = (perf_counter() - stage_started) * 1000
-
+        logger.info(f"Answer generated for query '{question}': {answer}")
         return CompletionRun(
             answer=answer,
-            timings=CompletionTimings(
-                metadata_filter_ms=metadata_filter_ms,
-                embedding_ms=embedding_ms,
-                hybrid_retrieval_ms=hybrid_retrieval_ms,
-                generation_ms=generation_ms,
-            ),
             evidence_count=len(evidence),
         )
 
     @staticmethod
-    def _clarification_run(
-        question: str,
-        *,
-        metadata_filter_ms: float,
-    ) -> CompletionRun:
+    def _clarification_run(question: str) -> CompletionRun:
         """Create a clarification result without embedding, retrieval, or generation."""
         return CompletionRun(
             answer=None,
-            timings=CompletionTimings(
-                metadata_filter_ms=metadata_filter_ms,
-                embedding_ms=0.0,
-                hybrid_retrieval_ms=0.0,
-                generation_ms=0.0,
-            ),
             evidence_count=0,
             clarification_question=question,
         )

@@ -40,7 +40,7 @@ from ddd_policy_tracer.retrieval.speaker_resolution import MongoTalkerNameResolv
 from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 from ddd_policy_tracer.utils.db_manager import DbManager, get_db_async
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object], None]:
         )
         talker_repository = MongoTalkerRepository(
             mongo_client,
-            os.environ.get("HANSARD_MONGO_DATABASE", "hansard"),
+            os.environ.get("HANSARD_MONGO_DATABASE", "tmp"),
         )
         completion_service = RagCompletionService(
             retriever=retriever,

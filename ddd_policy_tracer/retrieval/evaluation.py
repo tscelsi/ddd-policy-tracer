@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal, TypedDict, cast
 
+from ddd_policy_tracer.answering.completion_service import RagCompletionService
 from ddd_policy_tracer.retrieval.service_layer import (
     ChunkIdentityIndex,
-    HybridChunkRetriever,
-    QueryEmbedder,
-    retrieve_ranked_evidence,
+    RetrievedChunk,
 )
 
 ReviewStatus = Literal["draft", "approved", "rejected"]
@@ -29,6 +30,17 @@ class RetrievalCase(TypedDict, total=False):
 
 
 @dataclass(frozen=True)
+class RetrievedChunkRecord:
+    """Capture one ranked passage and its provenance for evaluation review."""
+
+    rank: int
+    chunk_id: str
+    chunk_text: str
+    source_document_id: str
+    metadata: str | None
+
+
+@dataclass(frozen=True)
 class CaseEvaluation:
     """Report one answerable query's target ranks and corpus validity."""
 
@@ -36,6 +48,8 @@ class CaseEvaluation:
     passed: bool
     target_ranks: dict[str, int | None]
     stale_chunk_ids: tuple[str, ...]
+    retrieved_chunks: tuple[RetrievedChunkRecord, ...] = ()
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -153,14 +167,43 @@ def transition_review_status(
     return updated
 
 
-def evaluate_cases(
+def append_evaluation_log(report: EvaluationReport, log_path: Path) -> None:
+    """Append one JSON record per case, including retrieved evidence and errors."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log_file:
+        for case in report.cases:
+            log_file.write(
+                json.dumps(
+                    {
+                        "case_id": case.case_id,
+                        "passed": case.passed,
+                        "target_ranks": case.target_ranks,
+                        "stale_chunk_ids": case.stale_chunk_ids,
+                        "error": case.error,
+                        "retrieved_chunks": [
+                            {
+                                "rank": chunk.rank,
+                                "chunk_id": chunk.chunk_id,
+                                "chunk_text": chunk.chunk_text,
+                                "source_document_id": chunk.source_document_id,
+                                "metadata": chunk.metadata,
+                            }
+                            for chunk in case.retrieved_chunks
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+            )
+
+
+async def evaluate_cases(
     cases: Sequence[Mapping[str, object]],
     *,
-    retriever: HybridChunkRetriever,
+    completion_service: RagCompletionService,
     chunk_index: ChunkIdentityIndex,
-    embedding_service: QueryEmbedder,
 ) -> EvaluationReport:
-    """Evaluate only approved answerable queries and list confirmed abstentions."""
+    """Evaluate approved queries using metadata-filtered RAG evidence."""
     approved_answerable: list[Mapping[str, object]] = []
     approved_unanswerable: list[str] = []
     for case in cases:
@@ -183,21 +226,38 @@ def evaluate_cases(
         },
     )
     corpus_chunk_ids = chunk_index.existing_chunk_ids(annotated_ids)
-
     results: list[CaseEvaluation] = []
     for case in approved_answerable:
         case_id = str(case["case_id"])
         gold_ids = cast(list[str], case["gold_evidence_chunk_ids"])
         stale_ids = tuple(sorted(set(gold_ids) - corpus_chunk_ids))
-        ranked_chunks = retrieve_ranked_evidence(
-            query=str(case["question"]),
-            retriever=retriever,
-            embedding_service=embedding_service,
-            limit=10,
+        try:
+            ranked_chunks: Sequence[RetrievedChunk] = await completion_service.retrieve(
+                str(case["question"]),
+                limit=10,
+            )
+        except Exception as exc:
+            results.append(
+                CaseEvaluation(
+                    case_id=case_id,
+                    passed=False,
+                    target_ranks=dict.fromkeys(gold_ids),
+                    stale_chunk_ids=stale_ids,
+                    error=f"{type(exc).__name__}: {exc}",
+                ),
+            )
+            continue
+        retrieved_chunks = tuple(
+            RetrievedChunkRecord(
+                rank=rank,
+                chunk_id=chunk.chunk_id,
+                chunk_text=chunk.chunk_text,
+                source_document_id=chunk.source_document_id,
+                metadata=chunk.metadata,
+            )
+            for rank, chunk in enumerate(ranked_chunks, start=1)
         )
-        retrieved_ranks = {
-            chunk.chunk_id: rank for rank, chunk in enumerate(ranked_chunks, start=1)
-        }
+        retrieved_ranks = {chunk.chunk_id: chunk.rank for chunk in retrieved_chunks}
         target_ranks = {chunk_id: retrieved_ranks.get(chunk_id) for chunk_id in gold_ids}
         passed = not stale_ids and all(rank is not None for rank in target_ranks.values())
         results.append(
@@ -206,6 +266,7 @@ def evaluate_cases(
                 passed=passed,
                 target_ranks=target_ranks,
                 stale_chunk_ids=stale_ids,
+                retrieved_chunks=retrieved_chunks,
             ),
         )
 

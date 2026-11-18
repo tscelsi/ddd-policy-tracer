@@ -150,7 +150,7 @@ class OpenAIQueryVariantDrafter:
             model=self.model,
             messages=messages,
             response_format=response_format,
-            temperature=0.3,
+            temperature=1,
         )
         if not response.choices:
             raise ValueError("OpenAI returned no query-variant choices")
