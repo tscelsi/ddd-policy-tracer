@@ -7,7 +7,7 @@ from typing import Literal, Protocol
 
 from torch import Tensor
 
-from ddd_policy_tracer.retrieval.metadata_filters import MetadataFilter
+from ddd_policy_tracer.retrieval.filtering.metadata_filters import MetadataFilter
 
 
 class RetrievedChunk(Protocol):

@@ -9,10 +9,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from ddd_policy_tracer.answering.service_layer import AnswerSynthesizer, SynthesizedAnswer
-from ddd_policy_tracer.retrieval.metadata_filters import (
+from ddd_policy_tracer.retrieval.filtering.metadata_filter_extractor import (
+    AbstractMetadataFilterExtractor,
+)
+from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
     MetadataFilter,
-    MetadataFilterExtractor,
-    SpeakerNameResolver,
+)
+from ddd_policy_tracer.retrieval.filtering.resolvers.speaker_name_resolver import (
+    AbstractSpeakerNameResolver,
 )
 from ddd_policy_tracer.retrieval.service_layer import (
     HybridChunkRetriever,
@@ -62,8 +66,8 @@ class RagCompletionService:
         retriever: HybridChunkRetriever,
         embedding_service: QueryEmbedder,
         synthesizer: AnswerSynthesizer,
-        metadata_filter_extractor: MetadataFilterExtractor,
-        speaker_name_resolver: SpeakerNameResolver,
+        metadata_filter_extractor: AbstractMetadataFilterExtractor,
+        speaker_name_resolver: AbstractSpeakerNameResolver,
     ) -> None:
         """Accept reusable ports for extraction, speaker resolution, retrieval, and answers."""
         self._retriever = retriever

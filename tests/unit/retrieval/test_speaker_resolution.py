@@ -3,7 +3,7 @@
 import pytest
 
 from ddd_policy_tracer.ingestion.hansard.talker_repository import Talker
-from ddd_policy_tracer.retrieval.speaker_resolution import MongoTalkerNameResolver
+from ddd_policy_tracer.retrieval.filtering.resolvers import MongoTalkerNameResolver
 
 
 class _TalkerRepository:

@@ -1,21 +1,38 @@
-"""Deterministic mapping from user-provided names to Hansard talker identities."""
+"""Module for resolving speaker names against the Hansard talker catalog."""
 
 from __future__ import annotations
 
 import asyncio
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
 from ddd_policy_tracer.ingestion.hansard.talker_repository import (
     AbstractTalkerRepository,
     Talker,
 )
-from ddd_policy_tracer.retrieval.metadata_filters import SpeakerResolution
 
 _WORD = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 
-class MongoTalkerNameResolver:
+@dataclass(frozen=True)
+class SpeakerResolution:
+    """Return resolved speaker IDs or a question for an ambiguous name."""
+
+    talker_ids: tuple[str, ...] = ()
+    clarification_question: str | None = None
+
+
+class AbstractSpeakerNameResolver(Protocol):
+    """Port for resolving a speaker name against the Hansard talker catalog."""
+
+    async def resolve(self, speaker_names: Sequence[str]) -> SpeakerResolution:
+        """Resolve names to talker IDs or request clarification."""
+        ...
+
+
+class MongoTalkerNameResolver(AbstractSpeakerNameResolver):
     """Resolve canonical names against a lazily loaded, process-cached catalog."""
 
     def __init__(self, repository: AbstractTalkerRepository) -> None:

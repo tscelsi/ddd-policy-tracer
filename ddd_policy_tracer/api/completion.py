@@ -15,7 +15,7 @@ from pymongo.errors import PyMongoError
 
 from ddd_policy_tracer.answering.completion_service import CompletionRun, RagCompletionService
 from ddd_policy_tracer.answering.service_layer import SynthesizedAnswer
-from ddd_policy_tracer.retrieval.metadata_filters import MetadataFilterExtractionError
+from ddd_policy_tracer.retrieval.filtering.metadata_filters import MetadataFilterExtractionError
 
 logger = logging.getLogger(__name__)
 

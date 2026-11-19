@@ -22,7 +22,7 @@ from ddd_policy_tracer.answering.service_layer import (
     AnswerSynthesizer,
 )
 from ddd_policy_tracer.api.completion import get_completion_service, router
-from ddd_policy_tracer.retrieval.metadata_filters import (
+from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
     MetadataFilter,
     MetadataFilterExtraction,
     SpeakerResolution,

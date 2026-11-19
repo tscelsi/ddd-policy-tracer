@@ -21,7 +21,7 @@ from ddd_policy_tracer.retrieval.evaluation import (
     transition_review_status,
     validate_case,
 )
-from ddd_policy_tracer.retrieval.metadata_filters import (
+from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
     MetadataFilter,
     MetadataFilterExtraction,
     SpeakerResolution,

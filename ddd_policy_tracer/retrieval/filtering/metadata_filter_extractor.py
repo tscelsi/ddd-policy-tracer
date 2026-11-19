@@ -11,30 +11,11 @@ from typing import Any, Protocol
 from ollama import ChatResponse, Client
 from openai import OpenAI
 
-from ddd_policy_tracer.retrieval.metadata_filters import (
+from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
+    METADATA_FILTER_SCHEMA,
     MetadataFilterExtraction,
     MetadataFilterExtractionError,
-    parse_metadata_filter_extraction,
 )
-
-METADATA_FILTER_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "date_from": {"type": ["string", "null"]},
-        "date_to": {"type": ["string", "null"]},
-        "speaker_names": {"type": "array", "items": {"type": "string"}},
-        "unsupported_filters": {"type": "array", "items": {"type": "string"}},
-        "clarification_question": {"type": ["string", "null"]},
-    },
-    "required": [
-        "date_from",
-        "date_to",
-        "speaker_names",
-        "unsupported_filters",
-        "clarification_question",
-    ],
-    "additionalProperties": False,
-}
 
 _SYSTEM_PROMPT = """Extract only metadata constraints the user requests for narrowing
 parliamentary speech retrieval. Never rewrite the question.
@@ -89,7 +70,20 @@ class MetadataFilterExtractorConfig:
             raise ValueError("temperature must not be negative")
 
 
-class OllamaMetadataFilterExtractor:
+class AbstractMetadataFilterExtractor(Protocol):
+    """Port for identifying filter intent without rewriting the original query."""
+
+    def extract(
+        self,
+        question: str,
+        *,
+        reference_date: date,
+    ) -> MetadataFilterExtraction:
+        """Return date, speaker, and unsupported constraints in the question."""
+        ...
+
+
+class OllamaMetadataFilterExtractor(AbstractMetadataFilterExtractor):
     """Use Ollama structured output to detect dates and requested speakers."""
 
     def __init__(
@@ -107,7 +101,7 @@ class OllamaMetadataFilterExtractor:
 
     def extract(self, question: str, *, reference_date: date) -> MetadataFilterExtraction:
         """Extract supported and unsupported retrieval constraints from a question."""
-        response = self._client.chat(
+        response = self._client.chat(  # type: ignore[call-arg]
             model=self.config.model,
             messages=_messages(question, reference_date),
             format=METADATA_FILTER_SCHEMA,
@@ -122,10 +116,10 @@ class OllamaMetadataFilterExtractor:
             raise MetadataFilterExtractionError(
                 "Ollama returned an empty metadata-filter response.",
             )
-        return _parse_provider_response(response.message.content, "Ollama")
+        return MetadataFilterExtraction.model_validate_json(response.message.content)
 
 
-class OpenAIMetadataFilterExtractor:
+class OpenAIMetadataFilterExtractor(AbstractMetadataFilterExtractor):
     """Use OpenAI JSON-schema output to detect dates and requested speakers."""
 
     def __init__(
@@ -166,7 +160,7 @@ class OpenAIMetadataFilterExtractor:
             raise MetadataFilterExtractionError(
                 "OpenAI returned an empty metadata-filter response.",
             )
-        return _parse_provider_response(message.content, "OpenAI")
+        return MetadataFilterExtraction.model_validate_json(message.content)
 
 
 def _messages(question: str, reference_date: date) -> list[dict[str, str]]:
@@ -181,13 +175,3 @@ def _messages(question: str, reference_date: date) -> list[dict[str, str]]:
             ),
         },
     ]
-
-
-def _parse_provider_response(content: str, provider: str) -> MetadataFilterExtraction:
-    """Validate provider JSON and retain provider context for explicit API errors."""
-    try:
-        return parse_metadata_filter_extraction(content)
-    except ValueError as exc:
-        raise MetadataFilterExtractionError(
-            f"{provider} returned an invalid metadata-filter response.",
-        ) from exc

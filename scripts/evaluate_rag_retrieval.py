@@ -32,7 +32,7 @@ from ddd_policy_tracer.retrieval.evaluation import (
     append_evaluation_log,
     evaluate_cases,
 )
-from ddd_policy_tracer.retrieval.speaker_resolution import MongoTalkerNameResolver
+from ddd_policy_tracer.retrieval.filtering.resolvers import MongoTalkerNameResolver
 from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 
 DEFAULT_FIXTURE_PATH = REPOSITORY_ROOT / "scripts" / "rag_retrieval_cases.json"

@@ -12,13 +12,13 @@ import pytest
 from ollama import ChatResponse, Message
 from openai import OpenAI
 
-from ddd_policy_tracer.answering.metadata_filter_extractor import (
+from ddd_policy_tracer.retrieval.filtering.metadata_filter_extractor import (
     METADATA_FILTER_SCHEMA,
     MetadataFilterExtractorConfig,
     OllamaMetadataFilterExtractor,
     OpenAIMetadataFilterExtractor,
 )
-from ddd_policy_tracer.retrieval.metadata_filters import (
+from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
     MetadataFilterExtraction,
     MetadataFilterExtractionError,
 )

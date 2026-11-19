@@ -12,11 +12,6 @@ from fastapi import FastAPI
 from pymongo import AsyncMongoClient
 
 from ddd_policy_tracer.answering.completion_service import RagCompletionService
-from ddd_policy_tracer.answering.metadata_filter_extractor import (
-    MetadataFilterExtractorConfig,
-    OllamaMetadataFilterExtractor,
-    OpenAIMetadataFilterExtractor,
-)
 from ddd_policy_tracer.answering.ollama_generator import (
     OllamaAnswerGenerator,
     OllamaAnswerGeneratorConfig,
@@ -36,7 +31,14 @@ from ddd_policy_tracer.enrichment.chunking.adapters import SQLiteDocumentChunkRe
 from ddd_policy_tracer.enrichment.embedding import EmbeddingService
 from ddd_policy_tracer.ingestion.hansard.talker_repository import MongoTalkerRepository
 from ddd_policy_tracer.paths import DATA_DIR
-from ddd_policy_tracer.retrieval.speaker_resolution import MongoTalkerNameResolver
+from ddd_policy_tracer.retrieval.filtering.metadata_filter_extractor import (
+    MetadataFilterExtractorConfig,
+    OllamaMetadataFilterExtractor,
+    OpenAIMetadataFilterExtractor,
+)
+from ddd_policy_tracer.retrieval.filtering.resolvers.speaker_name_resolver import (
+    MongoTalkerNameResolver,
+)
 from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 from ddd_policy_tracer.utils.db_manager import DbManager, get_db_async
 
