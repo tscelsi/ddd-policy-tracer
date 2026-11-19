@@ -12,7 +12,7 @@ from ddd_policy_tracer.completion.filtering.metadata_filters import (
     MetadataFilterExtraction,
 )
 from ddd_policy_tracer.completion.filtering.resolvers import SpeakerResolution
-from ddd_policy_tracer.completion.evaluation.main import (
+from ddd_policy_tracer.completion._evaluation.main import (
     evaluate_cases,
     transition_review_status,
     validate_case,

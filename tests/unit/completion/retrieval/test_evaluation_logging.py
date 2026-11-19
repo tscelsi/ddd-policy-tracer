@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ddd_policy_tracer.completion.evaluation.main import (
+from ddd_policy_tracer.completion._evaluation.main import (
     CaseEvaluation,
     EvaluationReport,
     RetrievedChunkRecord,

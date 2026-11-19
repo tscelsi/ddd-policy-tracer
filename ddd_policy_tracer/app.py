@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from pymongo import AsyncMongoClient
 
-from ddd_policy_tracer.completion.evaluation.query_variants import (
+from ddd_policy_tracer.completion._evaluation.query_variants import (
     OllamaQueryVariantDrafter,
     OpenAIQueryVariantDrafter,
     QueryVariantDrafter,

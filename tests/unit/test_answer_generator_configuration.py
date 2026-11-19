@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ddd_policy_tracer.completion.evaluation.query_variants import (
+from ddd_policy_tracer.completion._evaluation.query_variants import (
     OllamaQueryVariantDrafter,
     OpenAIQueryVariantDrafter,
 )
