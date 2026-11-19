@@ -27,7 +27,7 @@ from ddd_policy_tracer.app import (
 )
 from ddd_policy_tracer.enrichment.embedding import EmbeddingService
 from ddd_policy_tracer.ingestion.hansard.talker_repository import MongoTalkerRepository
-from ddd_policy_tracer.completion.retrieval.evaluation import (
+from ddd_policy_tracer.completion.evaluation.main import (
     EvaluationReport,
     append_evaluation_log,
     evaluate_cases,

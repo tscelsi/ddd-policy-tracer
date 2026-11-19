@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ddd_policy_tracer.answering.query_variants import (
+from ddd_policy_tracer.completion.evaluation.query_variants import (
     EvidencePassage,
     OpenAIQueryVariantDrafter,
     parse_query_variants,

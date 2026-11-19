@@ -23,7 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 if TYPE_CHECKING:
-    from ddd_policy_tracer.answering.query_variants import QueryVariantDrafter
+    from ddd_policy_tracer.completion.evaluation.query_variants import QueryVariantDrafter
 
 DEFAULT_FIXTURE_PATH = Path("tests/fixtures/rag_validation_cases.json")
 
@@ -298,7 +298,7 @@ def _read_fixture(path: Path) -> dict[str, Any]:
 
 def _save_case(fixture: dict[str, Any], case: dict[str, object], path: Path) -> None:
     """Append one reviewed candidate to the existing fixture."""
-    from ddd_policy_tracer.completion.retrieval.evaluation import validate_case
+    from ddd_policy_tracer.completion.evaluation.main import validate_case
 
     validate_case(case)
     fixture["cases"].append(case)
@@ -351,7 +351,7 @@ def _review_decision(
     reviewer: str,
 ) -> dict[str, object]:
     """Let a person edit, approve, reject, or retain a candidate as a draft."""
-    from ddd_policy_tracer.completion.retrieval.evaluation import transition_review_status
+    from ddd_policy_tracer.completion.evaluation.main import transition_review_status
 
     while True:
         print(f"\nQuery: {case['question']}")
@@ -398,7 +398,7 @@ def _review_selected_chunks(
     drafter: QueryVariantDrafter,
 ) -> None:
     """Draft distinct query candidates and preserve explicit human decisions."""
-    from ddd_policy_tracer.answering.query_variants import EvidencePassage
+    from ddd_policy_tracer.completion.evaluation.query_variants import EvidencePassage
 
     if not selected_rows:
         print("Select one or more chunks with x before drafting questions.")
