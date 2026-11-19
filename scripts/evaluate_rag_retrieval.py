@@ -18,8 +18,8 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from pymongo import AsyncMongoClient
 
-from ddd_policy_tracer.answering.completion_service import RagCompletionService
-from ddd_policy_tracer.answering.service_layer import AnswerSynthesizer
+from ddd_policy_tracer.completion.service_layer import RagCompletionService
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import AnswerSynthesizer
 from ddd_policy_tracer.app import (
     create_answer_generator,
     create_metadata_filter_extractor,
@@ -27,13 +27,13 @@ from ddd_policy_tracer.app import (
 )
 from ddd_policy_tracer.enrichment.embedding import EmbeddingService
 from ddd_policy_tracer.ingestion.hansard.talker_repository import MongoTalkerRepository
-from ddd_policy_tracer.retrieval.evaluation import (
+from ddd_policy_tracer.completion.retrieval.evaluation import (
     EvaluationReport,
     append_evaluation_log,
     evaluate_cases,
 )
-from ddd_policy_tracer.retrieval.filtering.resolvers import MongoTalkerNameResolver
-from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
+from ddd_policy_tracer.completion.filtering.resolvers import MongoTalkerNameResolver
+from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 
 DEFAULT_FIXTURE_PATH = REPOSITORY_ROOT / "scripts" / "rag_retrieval_cases.json"
 DEFAULT_DATABASE_PATH = REPOSITORY_ROOT / "data" / "new4.db"

@@ -11,35 +11,38 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from pymongo import AsyncMongoClient
 
-from ddd_policy_tracer.answering.completion_service import RagCompletionService
-from ddd_policy_tracer.answering.ollama_generator import (
-    OllamaAnswerGenerator,
-    OllamaAnswerGeneratorConfig,
-)
-from ddd_policy_tracer.answering.openai_generator import (
-    OpenAIAnswerGenerator,
-    OpenAIAnswerGeneratorConfig,
-)
 from ddd_policy_tracer.answering.query_variants import (
     OllamaQueryVariantDrafter,
     OpenAIQueryVariantDrafter,
     QueryVariantDrafter,
 )
-from ddd_policy_tracer.answering.service_layer import AnswerGenerator, AnswerSynthesizer
 from ddd_policy_tracer.api.completion import router as completion_router
-from ddd_policy_tracer.enrichment.chunking.adapters import SQLiteDocumentChunkRepository
-from ddd_policy_tracer.enrichment.embedding import EmbeddingService
-from ddd_policy_tracer.ingestion.hansard.talker_repository import MongoTalkerRepository
-from ddd_policy_tracer.paths import DATA_DIR
-from ddd_policy_tracer.retrieval.filtering.metadata_filter_extractor import (
+from ddd_policy_tracer.completion.filtering.metadata_filter_extractor import (
     MetadataFilterExtractorConfig,
     OllamaMetadataFilterExtractor,
     OpenAIMetadataFilterExtractor,
 )
-from ddd_policy_tracer.retrieval.filtering.resolvers.speaker_name_resolver import (
+from ddd_policy_tracer.completion.filtering.resolvers.speaker_name_resolver import (
     MongoTalkerNameResolver,
 )
-from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
+from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteHybridRetriever
+from ddd_policy_tracer.completion.service_layer import RagCompletionService
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import (
+    AnswerSynthesizer,
+)
+from ddd_policy_tracer.completion.synthesis.generators.base_generator import AbstractAnswerGenerator
+from ddd_policy_tracer.completion.synthesis.generators.ollama_generator import (
+    OllamaAnswerGenerator,
+    OllamaAnswerGeneratorConfig,
+)
+from ddd_policy_tracer.completion.synthesis.generators.openai_generator import (
+    OpenAIAnswerGenerator,
+    OpenAIAnswerGeneratorConfig,
+)
+from ddd_policy_tracer.enrichment.chunking.adapters import SQLiteDocumentChunkRepository
+from ddd_policy_tracer.enrichment.embedding import EmbeddingService
+from ddd_policy_tracer.ingestion.hansard.talker_repository import MongoTalkerRepository
+from ddd_policy_tracer.paths import DATA_DIR
 from ddd_policy_tracer.utils.db_manager import DbManager, get_db_async
 
 logging.basicConfig(level=logging.DEBUG)
@@ -52,7 +55,7 @@ def load_app_environment(env_file: Path = ENV_FILE) -> None:
     load_dotenv(dotenv_path=env_file, override=False)
 
 
-def create_answer_generator() -> AnswerGenerator:
+def create_answer_generator() -> AbstractAnswerGenerator:
     """Build the configured local or hosted answer-generation adapter."""
     provider = os.environ.get("RAG_ANSWER_GENERATOR", "ollama").strip().lower()
     if provider == "ollama":

@@ -5,85 +5,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Protocol
 
-
-class EvidenceChunk(Protocol):
-    """Expose retrieved speech text and provenance for answer synthesis."""
-
-    @property
-    def chunk_id(self) -> str:
-        """Return the stable identity of the evidence passage."""
-        ...
-
-    @property
-    def chunk_text(self) -> str:
-        """Return the speech passage used to support an answer."""
-        ...
-
-    @property
-    def source_document_id(self) -> str:
-        """Return the stable identity of the source speech document."""
-        ...
-
-    @property
-    def metadata(self) -> str | None:
-        """Return speaker and source metadata stored with the passage."""
-        ...
-
-
-@dataclass(frozen=True)
-class AnswerClaim:
-    """Represent one answer statement and the evidence passages supporting it."""
-
-    text: str
-    evidence_chunk_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class AnswerDraft:
-    """Represent structured claims returned by an answer-generation adapter."""
-
-    claims: tuple[AnswerClaim, ...] = ()
-    abstained: bool = False
-    abstention_reason: str | None = None
-
-
-class AnswerGenerator(Protocol):
-    """Port for generating structured claims from retrieved speech evidence."""
-
-    def generate(
-        self,
-        question: str,
-        evidence: Sequence[EvidenceChunk],
-    ) -> AnswerDraft:
-        """Return claims with evidence IDs or an explicit abstention."""
-        ...
-
-
-@dataclass(frozen=True)
-class AnswerCitation:
-    """Bind a rendered citation to its stored source passage and provenance."""
-
-    number: int
-    chunk_id: str
-    source_document_id: str
-    passage: str
-    speaker: str | None
-    date: str | None
-    house: str | None
-    chamber: str | None
-
-
-@dataclass(frozen=True)
-class SynthesizedAnswer:
-    """Return rendered answer text and the sources behind its citations."""
-
-    text: str
-    citations: tuple[AnswerCitation, ...]
-    abstained: bool
-    abstention_reason: str | None = None
+from ddd_policy_tracer.completion.synthesis.generators.base_generator import AbstractAnswerGenerator
+from ddd_policy_tracer.completion.synthesis.models import (
+    AnswerCitation,
+    EvidenceChunk,
+    SynthesizedAnswer,
+)
 
 
 class InvalidEvidenceReferenceError(ValueError):
@@ -93,7 +21,7 @@ class InvalidEvidenceReferenceError(ValueError):
 class AnswerSynthesizer:
     """Validate generated evidence references and render source-backed citations."""
 
-    def __init__(self, generator: AnswerGenerator) -> None:
+    def __init__(self, generator: AbstractAnswerGenerator) -> None:
         """Use the supplied generator to synthesize answers from retrieved evidence."""
         self._generator = generator
 

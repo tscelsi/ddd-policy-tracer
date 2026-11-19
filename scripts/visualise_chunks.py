@@ -298,7 +298,7 @@ def _read_fixture(path: Path) -> dict[str, Any]:
 
 def _save_case(fixture: dict[str, Any], case: dict[str, object], path: Path) -> None:
     """Append one reviewed candidate to the existing fixture."""
-    from ddd_policy_tracer.retrieval.evaluation import validate_case
+    from ddd_policy_tracer.completion.retrieval.evaluation import validate_case
 
     validate_case(case)
     fixture["cases"].append(case)
@@ -351,7 +351,7 @@ def _review_decision(
     reviewer: str,
 ) -> dict[str, object]:
     """Let a person edit, approve, reject, or retain a candidate as a draft."""
-    from ddd_policy_tracer.retrieval.evaluation import transition_review_status
+    from ddd_policy_tracer.completion.retrieval.evaluation import transition_review_status
 
     while True:
         print(f"\nQuery: {case['question']}")

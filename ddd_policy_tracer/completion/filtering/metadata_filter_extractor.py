@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from ollama import ChatResponse, Client
 from openai import OpenAI
 
-from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
+from ddd_policy_tracer.completion.filtering.metadata_filters import (
     METADATA_FILTER_SCHEMA,
     MetadataFilterExtraction,
     MetadataFilterExtractionError,

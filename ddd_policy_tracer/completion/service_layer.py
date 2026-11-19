@@ -8,21 +8,24 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from ddd_policy_tracer.answering.service_layer import AnswerSynthesizer, SynthesizedAnswer
-from ddd_policy_tracer.retrieval.filtering.metadata_filter_extractor import (
+from ddd_policy_tracer.completion.filtering.metadata_filter_extractor import (
     AbstractMetadataFilterExtractor,
 )
-from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
+from ddd_policy_tracer.completion.filtering.metadata_filters import (
     MetadataFilter,
 )
-from ddd_policy_tracer.retrieval.filtering.resolvers.speaker_name_resolver import (
+from ddd_policy_tracer.completion.filtering.resolvers.speaker_name_resolver import (
     AbstractSpeakerNameResolver,
 )
-from ddd_policy_tracer.retrieval.service_layer import (
+from ddd_policy_tracer.completion.retrieval.service_layer import (
     HybridChunkRetriever,
     QueryEmbedder,
     RetrievedChunk,
     embed_query,
+)
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import (
+    AnswerSynthesizer,
+    SynthesizedAnswer,
 )
 from ddd_policy_tracer.utils.logger import get_logger
 
@@ -82,7 +85,7 @@ class RagCompletionService:
         *,
         limit: int = 10,
     ) -> Sequence[RetrievedChunk]:
-        """Return the metadata filter and ranked evidence for a question."""
+        """Return the ranked evidence for a question."""
         reference_date = datetime.now(_CANBERRA).date()
         # Extract metadata constraints from the question, or raise if clarification is needed.
         logger.info(f"Extracting metadata filters for query '{question}'")

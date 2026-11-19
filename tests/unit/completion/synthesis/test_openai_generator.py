@@ -10,12 +10,12 @@ import httpx
 import pytest
 from openai import OpenAI
 
-from ddd_policy_tracer.answering.openai_generator import (
+from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.synthesis.generators.openai_generator import (
     OpenAIAnswerGenerator,
     OpenAIAnswerGeneratorConfig,
 )
-from ddd_policy_tracer.answering.service_layer import AnswerClaim, AnswerDraft
-from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.synthesis.models import AnswerClaim, AnswerDraft
 
 
 def _openai_client(
@@ -23,6 +23,7 @@ def _openai_client(
     capture_request: Callable[[dict[str, Any]], None] | None = None,
 ) -> OpenAI:
     """Build an OpenAI client backed by a local HTTP response."""
+
     def respond(request: httpx.Request) -> httpx.Response:
         if capture_request is not None:
             capture_request(json.loads(request.content))

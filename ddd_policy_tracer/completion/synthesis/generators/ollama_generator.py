@@ -9,14 +9,14 @@ from typing import Any, Protocol
 
 from ollama import ChatResponse, Client
 
-from ddd_policy_tracer.answering.service_layer import (
-    AnswerDraft,
-    EvidenceChunk,
-)
-from ddd_policy_tracer.answering.structured_output import (
+from ddd_policy_tracer.completion.synthesis.generators.base_generator import (
     ANSWER_SCHEMA,
     SYSTEM_PROMPT,
-    parse_answer_draft,
+    AbstractAnswerGenerator,
+)
+from ddd_policy_tracer.completion.synthesis.models import (
+    AnswerDraft,
+    EvidenceChunk,
 )
 
 
@@ -55,7 +55,7 @@ class OllamaAnswerGeneratorConfig:
             raise ValueError("temperature must not be negative")
 
 
-class OllamaAnswerGenerator:
+class OllamaAnswerGenerator(AbstractAnswerGenerator):
     """Adapt Ollama chat completions to the structured answer-generation port."""
 
     def __init__(
@@ -86,7 +86,7 @@ class OllamaAnswerGenerator:
         if not evidence:
             raise ValueError("evidence must not be empty")
 
-        request = {
+        request: dict[str, Any] = {
             "question": question,
             "evidence": [
                 {
@@ -98,7 +98,7 @@ class OllamaAnswerGenerator:
                 for chunk in evidence
             ],
         }
-        response = self._client.chat(
+        response = self._client.chat(  # type: ignore[call-arg]
             model=self.config.model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -115,4 +115,4 @@ class OllamaAnswerGenerator:
             raise TypeError("Ollama client returned a streaming response when stream=False")
         if response.message.content is None:
             raise ValueError("Ollama returned an empty answer response")
-        return parse_answer_draft(response.message.content, provider="Ollama")
+        return AnswerDraft.model_validate_json(response.message.content)

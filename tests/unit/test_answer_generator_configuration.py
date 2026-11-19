@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from ddd_policy_tracer.answering.ollama_generator import OllamaAnswerGenerator
-from ddd_policy_tracer.answering.openai_generator import OpenAIAnswerGenerator
 from ddd_policy_tracer.answering.query_variants import (
     OllamaQueryVariantDrafter,
     OpenAIQueryVariantDrafter,
 )
 from ddd_policy_tracer.app import create_answer_generator, create_query_variant_drafter
+from ddd_policy_tracer.completion.synthesis.generators.ollama_generator import OllamaAnswerGenerator
+from ddd_policy_tracer.completion.synthesis.generators.openai_generator import OpenAIAnswerGenerator
 
 
 def test_ollama_remains_the_default_answer_generator(

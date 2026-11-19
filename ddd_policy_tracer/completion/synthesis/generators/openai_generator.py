@@ -5,17 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from openai import OpenAI
 
-from ddd_policy_tracer.answering.service_layer import (
-    AnswerDraft,
-    EvidenceChunk,
-)
-from ddd_policy_tracer.answering.structured_output import (
+from ddd_policy_tracer.completion.synthesis.generators.base_generator import (
     ANSWER_SCHEMA,
     SYSTEM_PROMPT,
-    parse_answer_draft,
+    AbstractAnswerGenerator,
+)
+from ddd_policy_tracer.completion.synthesis.models import (
+    AnswerDraft,
+    EvidenceChunk,
 )
 
 
@@ -37,7 +38,7 @@ class OpenAIAnswerGeneratorConfig:
             raise ValueError("temperature must not be negative")
 
 
-class OpenAIAnswerGenerator:
+class OpenAIAnswerGenerator(AbstractAnswerGenerator):
     """Adapt OpenAI chat completions to the structured answer-generation port."""
 
     def __init__(
@@ -49,9 +50,7 @@ class OpenAIAnswerGenerator:
         """Use an injected OpenAI client or create one from its environment configuration."""
         self.config = config or OpenAIAnswerGeneratorConfig()
         self._client = (
-            client
-            if client is not None
-            else OpenAI(timeout=self.config.request_timeout_seconds)
+            client if client is not None else OpenAI(timeout=self.config.request_timeout_seconds)
         )
 
     def generate(
@@ -65,7 +64,7 @@ class OpenAIAnswerGenerator:
         if not evidence:
             raise ValueError("evidence must not be empty")
 
-        request = {
+        request: dict[str, Any] = {
             "question": question,
             "evidence": [
                 {
@@ -103,4 +102,4 @@ class OpenAIAnswerGenerator:
             raise ValueError(f"OpenAI refused to generate an answer: {message.refusal}")
         if message.content is None:
             raise ValueError("OpenAI returned an empty answer response")
-        return parse_answer_draft(message.content, provider="OpenAI")
+        return AnswerDraft.model_validate_json(message.content)

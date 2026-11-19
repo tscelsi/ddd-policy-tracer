@@ -13,9 +13,9 @@ import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32
 from torch import Tensor
 
-from ddd_policy_tracer.retrieval.filtering.metadata_filters import MetadataFilter
-from ddd_policy_tracer.retrieval.service_layer import retrieve_evidence_chunks
-from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteHybridRetriever
+from ddd_policy_tracer.completion.filtering.metadata_filters import MetadataFilter
+from ddd_policy_tracer.completion.retrieval.service_layer import retrieve_evidence_chunks
+from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteHybridRetriever
 
 
 class StubEmbeddingService:

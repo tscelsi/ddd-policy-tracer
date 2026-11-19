@@ -6,7 +6,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
+from ddd_policy_tracer.completion.filtering.metadata_filters import (
     MetadataFilterExtraction,
 )
 

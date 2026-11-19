@@ -9,11 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
-from ddd_policy_tracer.answering.completion_service import RagCompletionService
-from ddd_policy_tracer.retrieval.service_layer import (
+from ddd_policy_tracer.completion.retrieval.service_layer import (
     ChunkIdentityIndex,
     RetrievedChunk,
 )
+from ddd_policy_tracer.completion.service_layer import RagCompletionService
 
 ReviewStatus = Literal["draft", "approved", "rejected"]
 

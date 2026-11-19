@@ -13,21 +13,21 @@ from fastapi.testclient import TestClient
 from ollama import ChatResponse, Message
 from openai import APIConnectionError
 
-from ddd_policy_tracer.answering.completion_service import (
+from ddd_policy_tracer.api.completion import get_completion_service, router
+from ddd_policy_tracer.completion.filtering.metadata_filters import (
+    MetadataFilter,
+    MetadataFilterExtraction,
+)
+from ddd_policy_tracer.completion.filtering.resolvers import SpeakerResolution
+from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.service_layer import (
     CompletionRun,
     RagCompletionService,
 )
-from ddd_policy_tracer.answering.ollama_generator import OllamaAnswerGenerator
-from ddd_policy_tracer.answering.service_layer import (
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import (
     AnswerSynthesizer,
 )
-from ddd_policy_tracer.api.completion import get_completion_service, router
-from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
-    MetadataFilter,
-    MetadataFilterExtraction,
-    SpeakerResolution,
-)
-from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.synthesis.generators.ollama_generator import OllamaAnswerGenerator
 
 
 class StubEmbeddingService:

@@ -13,7 +13,7 @@ from threading import Lock
 import sqlite_vec  # type: ignore[import-untyped]
 from sqlite_vec import serialize_float32  # type: ignore[import-untyped]
 
-from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
+from ddd_policy_tracer.completion.filtering.metadata_filters import (
     MetadataFilter,
 )
 from ddd_policy_tracer.utils.time_helpers import utc_published_at_bounds

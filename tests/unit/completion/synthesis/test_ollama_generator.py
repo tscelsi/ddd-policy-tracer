@@ -9,16 +9,15 @@ from typing import Any
 import pytest
 from ollama import ChatResponse, Message
 
-from ddd_policy_tracer.answering.ollama_generator import (
+from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import (
+    AnswerSynthesizer,
+)
+from ddd_policy_tracer.completion.synthesis.generators.ollama_generator import (
     OllamaAnswerGenerator,
     OllamaAnswerGeneratorConfig,
 )
-from ddd_policy_tracer.answering.service_layer import (
-    AnswerClaim,
-    AnswerDraft,
-    AnswerSynthesizer,
-)
-from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.synthesis.models import AnswerClaim, AnswerDraft
 
 
 class StubOllamaClient:

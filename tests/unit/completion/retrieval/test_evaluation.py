@@ -7,25 +7,22 @@ from datetime import date
 
 import pytest
 
-from ddd_policy_tracer.answering.completion_service import (
-    RagCompletionService,
-    UnsupportedFilterError,
+from ddd_policy_tracer.completion.filtering.metadata_filters import (
+    MetadataFilter,
+    MetadataFilterExtraction,
 )
-from ddd_policy_tracer.answering.service_layer import (
-    AnswerDraft,
-    AnswerSynthesizer,
-    EvidenceChunk,
-)
-from ddd_policy_tracer.retrieval.evaluation import (
+from ddd_policy_tracer.completion.filtering.resolvers import SpeakerResolution
+from ddd_policy_tracer.completion.retrieval.evaluation import (
     evaluate_cases,
     transition_review_status,
     validate_case,
 )
-from ddd_policy_tracer.retrieval.filtering.metadata_filters import (
-    MetadataFilter,
-    MetadataFilterExtraction,
-    SpeakerResolution,
+from ddd_policy_tracer.completion.service_layer import (
+    RagCompletionService,
+    UnsupportedFilterError,
 )
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import AnswerSynthesizer
+from ddd_policy_tracer.completion.synthesis.models import AnswerDraft, EvidenceChunk
 
 
 class FakeEmbedder:

@@ -6,14 +6,12 @@ from collections.abc import Sequence
 
 import pytest
 
-from ddd_policy_tracer.answering.service_layer import (
-    AnswerClaim,
-    AnswerDraft,
+from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import (
     AnswerSynthesizer,
-    EvidenceChunk,
     InvalidEvidenceReferenceError,
 )
-from ddd_policy_tracer.retrieval.sqlite_retrieval import SQLiteChunkResult
+from ddd_policy_tracer.completion.synthesis.models import AnswerClaim, AnswerDraft, EvidenceChunk
 
 
 class StubAnswerGenerator:
