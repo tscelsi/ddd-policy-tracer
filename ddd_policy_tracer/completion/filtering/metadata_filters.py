@@ -45,7 +45,7 @@ class MetadataFilterExtraction(BaseModel):
     date_from: date | None = None
     date_to: date | None = None
     speaker_names: tuple[str, ...] = ()
-    bill_ids: tuple[str, ...] = ()
+    bill_names: tuple[str, ...] = ()
     unsupported_filters: tuple[str, ...] = ()
     clarification_question: str | None = None
 
@@ -57,8 +57,8 @@ class MetadataFilterExtraction(BaseModel):
                 raise ValueError("date_from must not be later than date_to")
         if any(not name.strip() for name in self.speaker_names):
             raise ValueError("speaker_names must not contain empty values")
-        if any(not bill_id.strip() for bill_id in self.bill_ids):
-            raise ValueError("bill_ids must not contain empty values")
+        if any(not bill_name.strip() for bill_name in self.bill_names):
+            raise ValueError("bill_names must not contain empty values")
         if any(not value.strip() for value in self.unsupported_filters):
             raise ValueError("unsupported_filters must not contain empty values")
         if self.clarification_question is not None:
@@ -67,4 +67,23 @@ class MetadataFilterExtraction(BaseModel):
         return self
 
 
-METADATA_FILTER_SCHEMA: dict[str, Any] = MetadataFilterExtraction.model_json_schema()
+METADATA_FILTER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "date_from": {"type": ["string", "null"]},
+        "date_to": {"type": ["string", "null"]},
+        "speaker_names": {"type": "array", "items": {"type": "string"}},
+        "bill_names": {"type": "array", "items": {"type": "string"}},
+        "unsupported_filters": {"type": "array", "items": {"type": "string"}},
+        "clarification_question": {"type": ["string", "null"]},
+    },
+    "required": [
+        "date_from",
+        "date_to",
+        "speaker_names",
+        "bill_names",
+        "unsupported_filters",
+        "clarification_question",
+    ],
+    "additionalProperties": False,
+}

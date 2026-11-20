@@ -13,9 +13,8 @@ from openai import APIError as OpenAIError
 from pydantic import BaseModel, ConfigDict, Field
 from pymongo.errors import PyMongoError
 
-from ddd_policy_tracer.completion.service_layer import CompletionRun, RagCompletionService
-from ddd_policy_tracer.completion.synthesis.answer_synthesizer import SynthesizedAnswer
 from ddd_policy_tracer.completion.filtering.metadata_filters import MetadataFilterExtractionError
+from ddd_policy_tracer.completion.service_layer import CompletionRun, RagCompletionService
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ class CompletionResponse(BaseModel):
                 clarification_required=True,
                 clarification_question=run.clarification_question,
             )
-        answer: SynthesizedAnswer = run.answer
+        answer = run.answer
         return cls(
             answer=answer.text,
             citations=[

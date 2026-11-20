@@ -12,21 +12,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ddd_policy_tracer.completion.filtering.resolvers.bill_name_resolver import (
+    MongoBillNameResolver,
+)
+from ddd_policy_tracer.ingestion.hansard.bill_repository import MongoBillRepository
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from pymongo import AsyncMongoClient
 
-from ddd_policy_tracer.completion.service_layer import RagCompletionService
-from ddd_policy_tracer.completion.synthesis.answer_synthesizer import AnswerSynthesizer
 from ddd_policy_tracer.app import (
     create_answer_generator,
     create_metadata_filter_extractor,
     load_app_environment,
 )
-from ddd_policy_tracer.enrichment.embedding import EmbeddingService
-from ddd_policy_tracer.ingestion.hansard.talker_repository import MongoTalkerRepository
 from ddd_policy_tracer.completion._evaluation.main import (
     EvaluationReport,
     append_evaluation_log,
@@ -34,6 +35,10 @@ from ddd_policy_tracer.completion._evaluation.main import (
 )
 from ddd_policy_tracer.completion.filtering.resolvers import MongoTalkerNameResolver
 from ddd_policy_tracer.completion.retrieval.sqlite_retrieval import SQLiteHybridRetriever
+from ddd_policy_tracer.completion.service_layer import RagCompletionService
+from ddd_policy_tracer.completion.synthesis.answer_synthesizer import AnswerSynthesizer
+from ddd_policy_tracer.enrichment.embedding import EmbeddingService
+from ddd_policy_tracer.ingestion.hansard.talker_repository import MongoTalkerRepository
 
 DEFAULT_FIXTURE_PATH = REPOSITORY_ROOT / "scripts" / "rag_retrieval_cases.json"
 DEFAULT_DATABASE_PATH = REPOSITORY_ROOT / "data" / "new4.db"
@@ -62,6 +67,12 @@ async def _run(
                 metadata_filter_extractor=create_metadata_filter_extractor(),
                 speaker_name_resolver=MongoTalkerNameResolver(
                     MongoTalkerRepository(
+                        mongo_client,
+                        os.environ.get("HANSARD_MONGO_DATABASE", "tmp"),
+                    ),
+                ),
+                bill_name_resolver=MongoBillNameResolver(
+                    MongoBillRepository(
                         mongo_client,
                         os.environ.get("HANSARD_MONGO_DATABASE", "tmp"),
                     ),

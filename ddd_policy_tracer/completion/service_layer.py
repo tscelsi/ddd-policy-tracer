@@ -14,6 +14,9 @@ from ddd_policy_tracer.completion.filtering.metadata_filter_extractor import (
 from ddd_policy_tracer.completion.filtering.metadata_filters import (
     MetadataFilter,
 )
+from ddd_policy_tracer.completion.filtering.resolvers.bill_name_resolver import (
+    AbstractBillNameResolver,
+)
 from ddd_policy_tracer.completion.filtering.resolvers.speaker_name_resolver import (
     AbstractSpeakerNameResolver,
 )
@@ -71,6 +74,7 @@ class RagCompletionService:
         synthesizer: AnswerSynthesizer,
         metadata_filter_extractor: AbstractMetadataFilterExtractor,
         speaker_name_resolver: AbstractSpeakerNameResolver,
+        bill_name_resolver: AbstractBillNameResolver,
     ) -> None:
         """Accept reusable ports for extraction, speaker resolution, retrieval, and answers."""
         self._retriever = retriever
@@ -78,6 +82,7 @@ class RagCompletionService:
         self._synthesizer = synthesizer
         self._metadata_filter_extractor = metadata_filter_extractor
         self._speaker_name_resolver = speaker_name_resolver
+        self._bill_name_resolver = bill_name_resolver
 
     async def retrieve(
         self,
@@ -113,10 +118,22 @@ class RagCompletionService:
             raise RuntimeError(
                 "Speaker resolver returned no IDs or clarification for requested names.",
             )
+        # Resolve bill names to bill IDs for filtering, or raise if clarification is needed.
+        logger.info(f"Resolving bill names for query '{question}': {extraction.bill_names}")
+        bill_resolution = await self._bill_name_resolver.resolve(
+            extraction.bill_names,
+        )
+        if bill_resolution.clarification_question is not None:
+            raise ClarificationRequiredError(bill_resolution.clarification_question)
+        if extraction.bill_names and not bill_resolution.bill_ids:
+            raise RuntimeError(
+                "Bill resolver returned no IDs or clarification for requested names.",
+            )
         filters = MetadataFilter(
             talker_ids=speaker_resolution.talker_ids,
             date_from=extraction.date_from,
             date_to=extraction.date_to,
+            bill_ids=bill_resolution.bill_ids,
         )
         logger.info(f"Metadata filters extracted for query '{question}': {filters}")
         query_embedding = await asyncio.to_thread(

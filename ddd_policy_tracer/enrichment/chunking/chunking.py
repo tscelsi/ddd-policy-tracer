@@ -64,7 +64,7 @@ def get_chunker(source_id: str) -> Chunker:
                 ("#;;#;;#;;", "__blank__"),
             ],  # won't find pattern so will default to splitting into equal parts
         )
-    return SpacyChunker()
+    return MarkdownChunker()
 
 
 class Chunker(Protocol):
@@ -73,11 +73,11 @@ class Chunker(Protocol):
     config: ChunkingConfig
 
     def __init__(self, config: ChunkingConfig | None = None) -> None:
-        """Initialise one SpacyChunker with chunking settings."""
+        """Initialise one Chunker with chunking settings."""
         self.config = config or ChunkingConfig()
 
     def set_config(self, config: ChunkingConfig) -> None:
-        """Update chunking settings on one SpacyChunker."""
+        """Update chunking settings on one Chunker."""
         self.config = config
 
     def chunk_document(
@@ -89,69 +89,69 @@ class Chunker(Protocol):
         ...
 
 
-class SpacyChunker(Chunker):
-    """Chunk one source document version into text spans for claim extraction using spaCy."""
+# class SpacyChunker(Chunker):
+#     """Chunk one source document version into text spans for claim extraction using spaCy."""
 
-    def chunk_document(
-        self,
-        *,
-        doc: SourceDocument,
-    ) -> list[DocumentChunk]:
-        """Split one document into stable sentence-based chunks."""
-        _validate_chunking_config(self.config)
+#     def chunk_document(
+#         self,
+#         *,
+#         doc: SourceDocument,
+#     ) -> list[DocumentChunk]:
+#         """Split one document into stable sentence-based chunks."""
+#         _validate_chunking_config(self.config)
 
-        normalized_text = doc.normalized_text.strip()
-        if not normalized_text:
-            return []
+#         normalized_text = doc.normalized_text.strip()
+#         if not normalized_text:
+#             return []
 
-        sentences = _segment_sentences(normalized_text)
-        chunks: list[DocumentChunk] = []
-        index = 0
-        start_sentence_index = 0
+#         sentences = _segment_sentences(normalized_text)
+#         chunks: list[DocumentChunk] = []
+#         index = 0
+#         start_sentence_index = 0
 
-        while start_sentence_index < len(sentences):
-            end_sentence_index = _select_chunk_end_sentence(
-                sentences=sentences,
-                start_sentence_index=start_sentence_index,
-                chunk_size_chars=self.config.chunk_size_chars,
-            )
-            start_char = sentences[start_sentence_index].start_char
-            end_char = sentences[end_sentence_index - 1].end_char
-            chunk_text = normalized_text[start_char:end_char]
-            chunk_id = build_chunk_id(
-                source_id=doc.source_id,
-                source_document_id=doc.source_document_id,
-                checksum=doc.checksum,
-                chunk_index=index,
-                start_char=start_char,
-                end_char=end_char,
-            )
-            chunks.append(
-                DocumentChunk(
-                    chunk_id=chunk_id,
-                    source_id=doc.source_id,
-                    source_document_id=doc.source_document_id,
-                    document_checksum=doc.checksum,
-                    chunk_index=index,
-                    start_char=start_char,
-                    end_char=end_char,
-                    chunk_text=chunk_text,
-                    **_chunk_provenance(doc),
-                ),
-            )
-            index += 1
+#         while start_sentence_index < len(sentences):
+#             end_sentence_index = _select_chunk_end_sentence(
+#                 sentences=sentences,
+#                 start_sentence_index=start_sentence_index,
+#                 chunk_size_chars=self.config.chunk_size_chars,
+#             )
+#             start_char = sentences[start_sentence_index].start_char
+#             end_char = sentences[end_sentence_index - 1].end_char
+#             chunk_text = normalized_text[start_char:end_char]
+#             chunk_id = build_chunk_id(
+#                 source_id=doc.source_id,
+#                 source_document_id=doc.source_document_id,
+#                 checksum=doc.checksum,
+#                 chunk_index=index,
+#                 start_char=start_char,
+#                 end_char=end_char,
+#             )
+#             chunks.append(
+#                 DocumentChunk(
+#                     chunk_id=chunk_id,
+#                     source_id=doc.source_id,
+#                     source_document_id=doc.source_document_id,
+#                     document_checksum=doc.checksum,
+#                     chunk_index=index,
+#                     start_char=start_char,
+#                     end_char=end_char,
+#                     chunk_text=chunk_text,
+#                     **_chunk_provenance(doc),
+#                 ),
+#             )
+#             index += 1
 
-            if end_sentence_index >= len(sentences):
-                break
+#             if end_sentence_index >= len(sentences):
+#                 break
 
-            start_sentence_index = _select_next_chunk_start_sentence(
-                sentences=sentences,
-                current_start_sentence_index=start_sentence_index,
-                current_end_sentence_index=end_sentence_index,
-                chunk_overlap_chars=self.config.chunk_overlap_chars,
-            )
+#             start_sentence_index = _select_next_chunk_start_sentence(
+#                 sentences=sentences,
+#                 current_start_sentence_index=start_sentence_index,
+#                 current_end_sentence_index=end_sentence_index,
+#                 chunk_overlap_chars=self.config.chunk_overlap_chars,
+#             )
 
-        return chunks
+#         return chunks
 
 
 class MarkdownChunker(Chunker):

@@ -70,7 +70,7 @@ infrastructure failures are not silently converted into answers.
 | Filter language and contracts | `filtering/metadata_filters.py` | Defines `MetadataFilter`, the `MetadataFilterExtraction` Pydantic model, its consistency rules, and the JSON schema supplied to structured-output providers. |
 | Filter extraction adapters | `filtering/metadata_filter_extractor.py` | Defines the `AbstractMetadataFilterExtractor` port and the Ollama and OpenAI implementations. The adapter returns structured filter intent; the service decides how to apply it. |
 | Filter-name resolution | `filtering/resolvers/speaker_name_resolver.py` | Defines the speaker-resolution contract and result. `MongoTalkerNameResolver` resolves names against the talker repository and asks for clarification if a name is missing or ambiguous. |
-| Bill resolution contract | `filtering/resolvers/bill_name_resolver.py` | Defines `AbstractBillNameResolver` and `BillResolution`. This is currently a contract only; the service does not yet invoke it. |
+| Bill resolution | `filtering/resolvers/bill_name_resolver.py` | Defines the bill resolver port and result plus `MongoBillNameResolver`, which resolves canonical, shortened, abbreviated, or slightly misspelled names against the Hansard bill catalog. The completion service does not yet invoke it. |
 | Retrieval contracts and query embedding | `retrieval/service_layer.py` | Defines `RetrievedChunk`, `QueryEmbedder`, `HybridChunkRetriever`, and `ChunkIdentityIndex`. `embed_query()` validates the embedding result, and retrieval helpers connect an embedding to the retriever. |
 | SQLite retrieval adapter | `retrieval/sqlite_retrieval.py` | Implements vector search, FTS5/BM25 search, metadata filtering, and reciprocal-rank fusion behind the retrieval contract. It also checks whether annotated chunk IDs remain in the corpus. |
 | Retrieval evaluation | `retrieval/evaluation.py` | Validates reviewed query/evidence cases, runs them through the completion service's retrieval path, records ranks and retrieved chunk details, and appends JSONL results for later review. |
@@ -106,13 +106,14 @@ specific libraries.
 
 ## Improvement opportunities
 
-1. **Finish bill filtering as a vertical slice.** `MetadataFilter` and the bill
-   resolver contract expose bill IDs, but the extraction model currently
-   extracts only dates and speaker names, `RagCompletionService` does not call
-   the bill resolver, and the filter's `is_empty` check does not account for
-   bill IDs. Either complete the flow—extract bill names, resolve them, carry
-   IDs into retrieval, and test the behavior end to end—or remove/defer the
-   unused contract so it does not imply supported behavior.
+1. **Finish bill filtering as a vertical slice.** `MongoBillNameResolver` now
+   resolves a title to a catalog ID, but the extraction model and
+   `RagCompletionService` do not yet extract or resolve bill names, and the
+   filter's `is_empty` check does not account for bill IDs. Complete the flow
+   by extracting bill names, resolving them, applying the IDs during retrieval,
+   and testing the behavior end to end. The current matcher is lexical; a
+   maintained alias catalog may be needed for colloquial names that do not
+   share words with the official title.
 2. **Separate ports from provider concerns more explicitly.** The answer
    generator port, prompt, and provider JSON schema currently share
    `generators/base_generator.py`. Keeping the port independent and moving

@@ -26,8 +26,9 @@ Supported constraints:
   year" mean the previous complete calendar period; "past N days/months/years"
   means a rolling period ending today.
 - `speaker_names`: people whose speeches the user explicitly asks to search.
+- `bill_names`: bills the user explicitly asks to search.
 
-Put explicit constraints on other metadata (such as party, house, chamber, bill,
+Put explicit constraints on other metadata (such as party, house, chamber
 or debate category) in `unsupported_filters`; do not silently omit them. Do not
 treat a topic merely mentioned in the question as a metadata constraint. Return
 an empty object of constraints for ordinary content questions. Use null for
@@ -136,7 +137,7 @@ class OpenAIMetadataFilterExtractor(AbstractMetadataFilterExtractor):
         """Extract supported and unsupported retrieval constraints from a question."""
         response = self._client.chat.completions.create(
             model=self.config.model,
-            messages=_messages(question, reference_date),
+            messages=_messages(question, reference_date),  # type: ignore[arg-type]
             response_format={
                 "type": "json_schema",
                 "json_schema": {
